@@ -341,7 +341,7 @@ class Hiera(nn.Module):
             if '3' in self.tuning_stage:
                 x = self.prompt_generator.get_prompt(x,prompt3, 3, i)
             # 插入cnn特征图
-            if feature_maps != None:
+            if feature_maps != [None] * 4:
                 if(i in [4, 14, 24, 34]):
                     # print(f"此时x的shape {x.shape}")    # 4, 14, 24, 34  torch.Size([2, 32, 32, 576])
                     # print(f"feature_maps的shape {feature_maps[index].shape}")
