@@ -1,7 +1,5 @@
 #%%
 import yaml
-with open('/home/yang/SAM2-UNet/cnn_backbone/SegNeXt/config.yaml') as fh:
-    config = yaml.load(fh, Loader=yaml.FullLoader)
 import torch
 import torch.nn as nn
 import math
@@ -17,11 +15,11 @@ class StemConv(nn.Module):
         self.proj = nn.Sequential(
                                     nn.Conv2d(in_channels, out_channels//2,
                                                 kernel_size=(3,3), stride=(2,2), padding=(1,1)),
-                                    NormLayer(out_channels//2, norm_type=config['norm_typ']),
+                                    NormLayer(out_channels//2, norm_type='sync_bn'),
                                     nn.GELU(),
                                     nn.Conv2d(out_channels//2, out_channels,
                                                 kernel_size=(3,3), stride=(2,2), padding=(1,1)),
-                                    NormLayer(out_channels, norm_type=config['norm_typ'])
+                                    NormLayer(out_channels, norm_type='sync_bn')
                                 )
     
     def forward(self, x):
@@ -52,7 +50,7 @@ class FFN(nn.Module):
 class BlockFFN(nn.Module):
     def __init__(self, in_channels, out_channels, hid_channels, ls_init_val=1e-2, drop_path=0.):
         super().__init__()
-        self.norm = NormLayer(in_channels, norm_type=config['norm_typ'])
+        self.norm = NormLayer(in_channels, norm_type='sync_bn')
         self.ffn = FFN(in_channels, out_channels, hid_channels)
         self.layer_scale = LayerScale(in_channels, init_value=ls_init_val)
         self.drop_path = StochasticDepth(p=drop_path)
@@ -110,7 +108,7 @@ class MSCA(nn.Module):
 class BlockMSCA(nn.Module):
     def __init__(self, dim, ls_init_val=1e-2, drop_path=0.0):
         super().__init__()
-        self.norm = NormLayer(dim, norm_type=config['norm_typ'])
+        self.norm = NormLayer(dim, norm_type='sync_bn')
         self.proj1 = nn.Conv2d(dim, dim, 1)
         self.act = nn.GELU()
         self.msca = MSCA(dim)
@@ -176,7 +174,7 @@ class MSCANet(nn.Module):
                                    ls_init_val=ls_init_val, drop_path=dpr[cur + j])
                                    for j in range(depths[i])])
 
-            norm_layer = NormLayer(embed_dims[i], norm_type=config['norm_typ'])
+            norm_layer = NormLayer(embed_dims[i], norm_type='sync_bn')
             cur += depths[i]
 
             setattr(self, f'input_embed{i+1}', input_embed)
@@ -213,7 +211,7 @@ class MSCANet(nn.Module):
 model = MSCANet(in_channnels=3, embed_dims=[64, 128, 320, 512],
                  ffn_ratios=[4, 4, 4, 4], depths=[3, 3, 12, 3],
                  num_stages = 4, ls_init_val=1e-2, drop_path=0.0)
-device = torch.device("cuda")
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 model.to(device)
 #summary(model, (3,512,512))
 

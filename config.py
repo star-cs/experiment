@@ -1,16 +1,16 @@
 import os
 
 config_base = {
-    'root_path' : '/home/yang/SAM2-UNet',
+    'root_path' : '/root/autodl-tmp/',
     
     'ckp_path' : 'checkpoint',
-    'ckp_hiera_name' : 'sam2_hiera_large.pt',
+    'ckp_hiera_name' : 'sam2_hiera_large.pt',  # 默认使用 large，后期改成 base 版本
     
-    'dataset_path': 'data_demo',
-    'train_image_name' : 'Kvasir-SEG/images/Train/',
-    'train_gt_name' : 'Kvasir-SEG/masks/Train/',
-    'test_image_name' : 'Kvasir-SEG/images/Val/',
-    'test_gt_name' : 'Kvasir-SEG/masks/Val/', 
+    'dataset_path': 'datasets',
+    'train_image_name' : 'Kvasir-SEG/Images/Train/',
+    'train_gt_name' : 'Kvasir-SEG/Masks/Train/',
+    'test_image_name' : 'Kvasir-SEG/Images/Val/',
+    'test_gt_name' : 'Kvasir-SEG/Masks/Val/', 
     
     'log_path' : 'log', 
     'save_model' : 'model_log', 
@@ -18,7 +18,7 @@ config_base = {
     
     'epoch' : 20,
     'lr' : 0.001,
-    'batch_size' : 2,
+    'batch_size' : 6,
     'weight_decay' : 5e-4,
 
     'image_size' : 512,
