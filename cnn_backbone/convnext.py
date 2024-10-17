@@ -179,11 +179,11 @@ class LayerNorm(nn.Module):
             return x
         
 
-if __name__ == "__main__":
-    model = ConvNeXt()
-    model.eval()
-    x = torch.randn(1,3,256,256)
-    y = model(x)
-    #torch.save(model.state_dict(), 'cat.pth')
-    for i in y:
-        print(i.shape)
+# if __name__ == "__main__":
+#     model = ConvNeXt()
+#     model.eval()
+#     x = torch.randn(1,3,256,256)
+#     y = model(x)
+#     #torch.save(model.state_dict(), 'cat.pth')
+#     for i in y:
+#         print(i.shape)

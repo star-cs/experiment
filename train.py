@@ -11,7 +11,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 from dataset import FullDataset, TestDataset
 from SAM2UNet import SAM2UNet
-from config import path_config, config_base
+from config import path_config, config_base, config_neck
 from torch.utils.tensorboard import SummaryWriter
 import pandas as pd
 import csv
@@ -36,10 +36,12 @@ def evaluate(pred, gt):
 
     Dice = 2 * TP / (2 * TP + FP + FN)
     IoU = TP / (TP + FP + FN)
-    Sen = TP / (TP + FN)
-    Spe = TN / (TN + FP)
-    Acc = (TP + TN) / (TP + FP + TN + FN)
-    return Dice, IoU, Sen, Spe, Acc
+    Pre = TP/ (TP + FP)
+    Recall = TP / (TP + FN)
+    # Sen = TP / (TP + FN)
+    # Spe = TN / (TN + FP)
+    # Acc = (TP + TN) / (TP + FP + TN + FN)
+    return Dice, IoU, Pre, Recall
 
 
 class Metrics(object):
@@ -91,7 +93,7 @@ def file_check(file_name):
 @torch.no_grad
 def test_medics(model, device, writer, test_dataloader, epoch):
     # metrics = Metrics(['Dice', 'IoU', 'Sen', 'Spe', 'Acc'])
-    metrics = Metrics(['Dice', 'IoU']) 
+    metrics = Metrics(['Dice', 'IoU', 'Pre', 'Recall']) 
     
     Loss, Wbce, Wiou = 0, 0, 0
     test_dataloader = tqdm(test_dataloader)
@@ -102,11 +104,11 @@ def test_medics(model, device, writer, test_dataloader, epoch):
         target = target.to(device)
         pred0, pred1, pred2 = model(x)
                         
-        _Dice, _IoU, _Sen, _Spe, _Acc = evaluate(pred0, target)
+        _Dice, _IoU, _Pre, _Recall = evaluate(pred0, target)
                         
         # metrics.update(Dice = _Dice, IoU = _IoU, Sen = _Sen, 
         #                 Spe = _Spe, Acc = _Acc)
-        metrics.update(Dice = _Dice, IoU = _IoU)
+        metrics.update(Dice = _Dice, IoU = _IoU , Pre = _Pre, Recall = _Recall)
         loss0, wbce0, wiou0 = structure_loss(pred0, target)
         loss1, wbce1, wiou1 = structure_loss(pred1, target)
         loss2, wbce2, wiou2 = structure_loss(pred2, target)
@@ -124,34 +126,32 @@ def test_medics(model, device, writer, test_dataloader, epoch):
 
     metrics_result = metrics.mean(len(test_dataloader))
     print("Test Metrics Result:")
-    print('Dice: %.4f\nIoU: %.4f\n' %(metrics_result['Dice'], metrics_result['IoU']))
-    # print('Dice: %.4f\nIoU: %.4f\nSen: %.4f\nSpe: %.4f\nAcc: %.4f'
-    #                         % (metrics_result['Dice'], metrics_result['IoU'], metrics_result['Sen'],
-    #                         metrics_result['Spe'], metrics_result['Acc']))
+    print('Dice: %.4f\nIoU: %.4f\nPre: %.4f\nRecall: %.4f\n' %(metrics_result['Dice'], metrics_result['IoU'],
+                                                               metrics_result['Pre'], metrics_result['Recall']))
     writer.add_scalar('info/metrics/Dice', metrics_result['Dice'], epoch+1)
     writer.add_scalar('info/metrics/IoU', metrics_result['IoU'], epoch+1)
-    # writer.add_scalar('info/metrics/Sen', metrics_result['Sen'], epoch+1)
-    # writer.add_scalar('info/metrics/Spe', metrics_result['Spe'], epoch+1)
-    # writer.add_scalar('info/metrics/Acc', metrics_result['Acc'], epoch+1)      
-    return Loss.item(), Wbce.item(), Wiou.item(), metrics_result['Dice'],  metrics_result['IoU']
+    writer.add_scalar('info/metrics/Pre', metrics_result['Pre'], epoch+1)
+    writer.add_scalar('info/metrics/Recall', metrics_result['Recall'], epoch+1)
+    return Loss.item(), Wbce.item(), Wiou.item(), metrics_result['Dice'],  metrics_result['IoU'], metrics_result['Pre'] , metrics_result['Recall']
 
 def main():  
     print(config_base)  
     print(path_config)
-    
+    print(config_neck)
     file_path = os.path.join(path_config['csv_path'], path_config['train_version'] + '.csv')
     file_path = file_check(file_path)
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
     csv_f = open(file_path, 'w' , encoding='utf-8')
     csv_writer = csv.writer(csv_f)
     csv_writer.writerow(['time', 'step', 'train Loss', 'train wbce', 'train wiou',
-                         'test Loss', 'test wbce', 'test wiou', 'test metrics Dice', 'test metrics IoU'])
+                         'test Loss', 'test wbce', 'test wiou',
+                         'test metrics Dice', 'test metrics IoU', 'test metrics Pre', 'test metrics Recall'])
     
     dataset = FullDataset(path_config['train_image_path'],
                         path_config['train_mask_path'],
                         config_base['image_size'],
                         mode='train')
-    
+     
     test_loader = FullDataset(path_config['test_image_path'],
                         path_config['test_mask_path'],
                         config_base['image_size'],
@@ -209,10 +209,10 @@ def main():
             torch.save(model.state_dict(), os.path.join(path_config['save_path'], 'SAM2-UNet-%d.pth' % (epoch + 1)))
             print('[Saving Snapshot:]', os.path.join(path_config['save_path'], 'SAM2-UNet-%d.pth'% (epoch + 1)))
 
-        test_Loss, test_wbce, test_wiou, Dice, IoU = test_medics(model, device, writer, test_dataloader, epoch)
+        test_Loss, test_wbce, test_wiou, Dice, IoU, Pre, Recall = test_medics(model, device, writer, test_dataloader, epoch)
 
         csv_writer.writerow((time.asctime(), epoch+1, Loss.item(), Wbce.item(), Wiou.item(), 
-                      test_Loss, test_wbce, test_wiou, Dice, IoU))      
+                      test_Loss, test_wbce, test_wiou, Dice, IoU, Pre,Recall))      
 
 # def seed_torch(seed=1024):
 # 	random.seed(seed)

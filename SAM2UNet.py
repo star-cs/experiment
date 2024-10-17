@@ -7,7 +7,7 @@ import torch.nn.functional as F
 from cnn_backbone import ResNet, buile_convnextv2, buile_segnext
 from common import Reshaper
 from sam2.build_sam import build_sam2
-from u_neck import RCM
+from u_neck import RCM, Duck_Block
 import utils
 
 TORCH_MAJOR = int(torch.__version__.split('.')[0])
@@ -720,6 +720,12 @@ class SAM2UNet(nn.Module):
 				self.rfb2 = RFB_modified(288, 64)
 				self.rfb3 = RFB_modified(576, 64)
 				self.rfb4 = RFB_modified(1152, 64)
+
+			if(neck_type == 'Duck'):
+				self.duck1 = Duck_Block(144, 64)
+				self.duck2 = Duck_Block(288, 64)
+				self.duck3 = Duck_Block(576, 64)
+				self.duck4 = Duck_Block(1152, 64)
 		
 		self.up1 = (Up(128, 64))
 		self.up2 = (Up(128, 64))
@@ -882,6 +888,9 @@ class SAM2UNet(nn.Module):
 			if(neck_type == 'RFB'):
 				x1, x2, x3, x4 = self.rfb1(x1), self.rfb2(x2), self.rfb3(x3), self.rfb4(x4)
 		
+			if(neck_type == 'Duck'):
+				x1, x2, x3, x4 = self.duck1(x1), self.duck2(x2), self.duck3(x3), self.duck4(x4)
+
 		x = self.up1(x4, x3)
 		out2 = F.interpolate(self.side1(x), scale_factor=16, mode='bilinear')
 		x = self.up2(x, x2)
@@ -890,14 +899,13 @@ class SAM2UNet(nn.Module):
 		out = F.interpolate(self.head(x), scale_factor=4, mode='bilinear')
 		return out, out1, out2 
 
-
-if __name__ == "__main__":
-	with torch.no_grad():
-		model = SAM2UNet().cuda()
-		x = torch.randn(1, 3, 512, 512).cuda()
-		# feature_maps = ResNet(50,False)
-		out, out1, out2 = model(x)
-		print(out.shape, out1.shape, out2.shape)
+# if __name__ == "__main__":
+# 	with torch.no_grad():
+# 		model = SAM2UNet().cuda()
+# 		x = torch.randn(1, 3, 512, 512).cuda()
+# 		# feature_maps = ResNet(50,False)
+# 		out, out1, out2 = model(x)
+# 		print(out.shape, out1.shape, out2.shape)
 
 
 

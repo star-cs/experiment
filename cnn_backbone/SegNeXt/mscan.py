@@ -210,19 +210,19 @@ class MSCANet(nn.Module):
 
 
 #from torchsummary import summary
-model = MSCANet(in_channnels=3, embed_dims=[64, 128, 320, 512],
-                 ffn_ratios=[4, 4, 4, 4], depths=[3, 3, 12, 3],
-                 num_stages = 4, ls_init_val=1e-2, drop_path=0.0)
-device = torch.device("cuda")
-model.to(device)
-#summary(model, (3,512,512))
+# model = MSCANet(in_channnels=3, embed_dims=[64, 128, 320, 512],
+#                  ffn_ratios=[4, 4, 4, 4], depths=[3, 3, 12, 3],
+#                  num_stages = 4, ls_init_val=1e-2, drop_path=0.0)
+# device = torch.device("cuda")
+# model.to(device)
+# #summary(model, (3,512,512))
 
-y = torch.randn((1,3,512,512)).to(device) #.to('cuda' if torch.cuda.is_available() else 'cpu')
+# y = torch.randn((1,3,512,512)).to(device) #.to('cuda' if torch.cuda.is_available() else 'cpu')
 
-x = model.forward(y)
+# x = model.forward(y)
 
-for i in range(4):
-    print(x[i].shape)
+# for i in range(4):
+#     print(x[i].shape)
 
 # torch.Size([1, 64, 128, 128])
 # torch.Size([1, 128, 64, 64])

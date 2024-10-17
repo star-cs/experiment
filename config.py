@@ -83,7 +83,8 @@ path_config = {
 
 
 config_neck = {
-     # RFB(SAM2_UNet模块) 
-     # RCM(https://arxiv.org/pdf/2405.06228)
-    'neck_type' : ['RCM' , 'RFB'], 
+     # RFB(SAM2_UNet模块)                       channels 不变
+     # RCM(https://arxiv.org/pdf/2405.06228)    input channels --> output channels
+     # Duck Block                               input channels --> output channels
+    'neck_type' : ['Duck'], 
 }
