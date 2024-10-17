@@ -6,6 +6,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from cnn_backbone import ResNet, buile_convnextv2, buile_segnext
 from common import Reshaper
+from decoder import EMCAD
 from sam2.build_sam import build_sam2
 from u_neck import RCM, Duck_Block
 import utils
@@ -17,7 +18,7 @@ if TORCH_MAJOR == 1 and TORCH_MINOR < 8:
 else:
 	import collections.abc as container_abcs
 
-from config import config_base, path_config, config_neck
+from config import config_base, path_config, config_neck, config_decoder
 
 class DoubleConv(nn.Module):
 	"""(convolution => [BN] => ReLU) * 2"""
@@ -692,6 +693,7 @@ class SAM2UNet(nn.Module):
 		# self.encoder.blocks = nn.Sequential(
 		#     *blocks
 		# )
+# ============================ Adapter ============================
 		self.embed_dim = [144, 288, 576, 1152]
 		self.depth = [2, 6, 36, 4]
 		self.blocks = nn.ModuleList()
@@ -708,7 +710,10 @@ class SAM2UNet(nn.Module):
 												self.input_type, self.freq_nums,
 												self.handcrafted_tune, self.embedding_tune, self.adaptor,
 												img_size=config_base['image_size'])
+# ============================ neck ============================
 		for neck_type in config_neck['neck_type']:
+			if(neck_type == 'None'):		# 此时，neck不操作
+				break
 			if(neck_type == 'RCM'):
 				self.rcm1 = RCM(144)
 				self.rcm2 = RCM(288)
@@ -726,15 +731,30 @@ class SAM2UNet(nn.Module):
 				self.duck2 = Duck_Block(288, 64)
 				self.duck3 = Duck_Block(576, 64)
 				self.duck4 = Duck_Block(1152, 64)
-		
-		self.up1 = (Up(128, 64))
-		self.up2 = (Up(128, 64))
-		self.up3 = (Up(128, 64))
-		self.up4 = (Up(128, 64))
-		self.side1 = nn.Conv2d(64, 1, kernel_size=1)
-		self.side2 = nn.Conv2d(64, 1, kernel_size=1)
-		self.head = nn.Conv2d(64, 1, kernel_size=1)
-		
+				
+# ============================ decoder ============================
+		if(config_decoder['decoder_type'] == 'UNet'):
+			self.up1 = (Up(128, 64))
+			self.up2 = (Up(128, 64))
+			self.up3 = (Up(128, 64))
+			self.up4 = (Up(128, 64))
+			self.side1 = nn.Conv2d(64, 1, kernel_size=1)
+			self.side2 = nn.Conv2d(64, 1, kernel_size=1)
+			self.side3 = nn.Conv2d(64, 1, kernel_size=1)
+			self.head = nn.Conv2d(64, 1, kernel_size=1)
+
+		elif(config_decoder['decoder_type'] == 'EMCAD'):
+			channels = [1152, 576, 288, 144]
+			self.decoder = EMCAD(channels=channels, kernel_sizes=[1,3,5], 
+						expansion_factor=2, dw_parallel=True, add=True, lgag_ks=3, activation='relu')
+			print('Model %s created, param count: %d' %
+						('EMCAD decoder: ', sum([m.numel() for m in self.decoder.parameters()])))
+			self.out_head4 = nn.Conv2d(channels[0], 1, 1)
+			self.out_head3 = nn.Conv2d(channels[1], 1, 1)
+			self.out_head2 = nn.Conv2d(channels[2], 1, 1)
+			self.out_head1 = nn.Conv2d(channels[3], 1, 1)
+
+# ============================ cnn ============================
 		if(config_base['cnn_label'] == 'none'):
 			self.cnn_backbone = None
 
@@ -768,7 +788,6 @@ class SAM2UNet(nn.Module):
 				param.requires_grad = False
 			
 
-			
 		if(self.cnn_backbone != None):
 			channel_list = self.cnn_backbone.channel_list
 			feature_size = self.cnn_backbone.feature_size
@@ -882,6 +901,9 @@ class SAM2UNet(nn.Module):
 		# torch.Size([2, 576, 32, 32]) 
 		# torch.Size([2, 1152, 16, 16])
 		for neck_type in config_neck['neck_type']:
+			if(neck_type == 'None'):		# 此时，neck不操作
+				break
+
 			if(neck_type == 'RCM'):
 				x1, x2, x3, x4 = self.rcm1(x1), self.rcm2(x2), self.rcm3(x3), self.rcm4(x4)
 			
@@ -890,14 +912,30 @@ class SAM2UNet(nn.Module):
 		
 			if(neck_type == 'Duck'):
 				x1, x2, x3, x4 = self.duck1(x1), self.duck2(x2), self.duck3(x3), self.duck4(x4)
+		
 
-		x = self.up1(x4, x3)
-		out2 = F.interpolate(self.side1(x), scale_factor=16, mode='bilinear')
-		x = self.up2(x, x2)
-		out1 = F.interpolate(self.side2(x), scale_factor=8, mode='bilinear')
-		x = self.up3(x, x1)
-		out = F.interpolate(self.head(x), scale_factor=4, mode='bilinear')
-		return out, out1, out2 
+		if(config_decoder['decoder_type'] == 'UNet'):
+			x = x4
+			out3 = F.interpolate(self.side3(x), scale_factor=32, mode='bilinear')
+			x = self.up1(x4, x3)
+			out2 = F.interpolate(self.side2(x), scale_factor=16, mode='bilinear')
+			x = self.up2(x, x2)
+			out1 = F.interpolate(self.side1(x), scale_factor=8, mode='bilinear')
+			x = self.up3(x, x1)
+			out = F.interpolate(self.head(x), scale_factor=4, mode='bilinear')
+		elif(config_decoder['decoder_type'] == 'EMCAD'):
+			dec_outs = self.decoder(x4, [x3, x2, x1])
+			
+			p4 = self.out_head4(dec_outs[0])		# 1*1 conv 调通道
+			p3 = self.out_head3(dec_outs[1])
+			p2 = self.out_head2(dec_outs[2])
+			p1 = self.out_head1(dec_outs[3])
+			out3 = F.interpolate(p4, scale_factor=32, mode='bilinear')
+			out2 = F.interpolate(p3, scale_factor=16, mode='bilinear')
+			out1 = F.interpolate(p2, scale_factor=8, mode='bilinear')
+			out = F.interpolate(p1, scale_factor=4, mode='bilinear')
+			
+		return out, out1, out2, out3
 
 # if __name__ == "__main__":
 # 	with torch.no_grad():

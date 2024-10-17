@@ -32,6 +32,30 @@ config_base = {
         
 }
 
+'''
+可选组合 : 
+['RFB'] + 'UNet'
+['RCM', 'RFB'] + 'UNet'
+['RCM', 'Duck'] + 'UNet'
+
+['RCM'] + 'EMCAD'
+['None'] + 'EMCAD'
+'''
+
+config_neck = {
+    # None
+    # RFB(SAM2_UNet模块)                       channels 不变
+    # RCM(https://arxiv.org/pdf/2405.06228)    input channels --> output channels
+    # Duck Block                               input channels --> output channels
+
+    'neck_type' : ['None'], 
+}
+
+config_decoder = {
+    # UNet   默认                              # 使用这个模块，neck得加RFB，把通道数全部转成 64
+    # EMCAD  https://arxiv.org/abs/2405.06880  # 使用这个模块，默认neck部分就不能改变通道数。此时，neck_type只能为None
+    'decoder_type' : 'EMCAD'            
+}
 
 path_config = {
     'hiera_path' : str(os.path.join(config_base['root_path'], 
@@ -77,14 +101,10 @@ path_config = {
                                 config_base['log_path'],
                                 config_base['csv_path'])), 
 
-    'train_version' : config_base['cnn_label'] + "_" + config_base['adapter_type'],  #  用于区分log文件
-                                         
+    'train_version' : str(config_base['cnn_label'] + "_" + 
+                    config_base['adapter_type'] + "_" + 
+                    '+'.join(str(item) for item in config_neck['neck_type'])  + "_" +  
+                    config_decoder['decoder_type']),  #  用于区分log文件                                       
 }
 
 
-config_neck = {
-     # RFB(SAM2_UNet模块)                       channels 不变
-     # RCM(https://arxiv.org/pdf/2405.06228)    input channels --> output channels
-     # Duck Block                               input channels --> output channels
-    'neck_type' : ['Duck'], 
-}

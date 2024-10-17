@@ -11,8 +11,8 @@ from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
 from dataset import FullDataset, TestDataset
 from SAM2UNet import SAM2UNet
-from config import path_config, config_base, config_neck
-from torch.utils.tensorboard import SummaryWriter
+from config import path_config, config_base, config_neck, config_decoder
+from tensorboardX import SummaryWriter
 import pandas as pd
 import csv
 
@@ -80,12 +80,26 @@ def file_check(file_name):
     temp_file_name = file_name
     i = 1
     while i:
-        print(temp_file_name)
-        print(os.path.exists(temp_file_name))
+        #print(temp_file_name)
+        #print(os.path.exists(temp_file_name))
         if os.path.exists(temp_file_name):
             name, suffix = file_name.split('.')
-            name += '(' + str(i) + ')'
+            name += '_' + str(i)
             temp_file_name = name+'.'+suffix
+            i = i+1
+        else:
+            return temp_file_name
+
+def dir_check(file_name):
+    temp_file_name = file_name
+    i = 1
+    while i:
+        #print(temp_file_name)
+        #print(os.path.exists(temp_file_name))
+        if os.path.exists(temp_file_name):
+            name, suffix = os.path.split(file_name)
+            suffix += '_' + str(i)
+            temp_file_name = name +'/'+suffix
             i = i+1
         else:
             return temp_file_name
@@ -102,7 +116,7 @@ def test_medics(model, device, writer, test_dataloader, epoch):
         target = batch['label']
         x = x.to(device)
         target = target.to(device)
-        pred0, pred1, pred2 = model(x)
+        pred0, pred1, pred2, pred3 = model(x)
                         
         _Dice, _IoU, _Pre, _Recall = evaluate(pred0, target)
                         
@@ -112,9 +126,10 @@ def test_medics(model, device, writer, test_dataloader, epoch):
         loss0, wbce0, wiou0 = structure_loss(pred0, target)
         loss1, wbce1, wiou1 = structure_loss(pred1, target)
         loss2, wbce2, wiou2 = structure_loss(pred2, target)
-        Loss += loss0 + loss1 + loss2
-        Wbce += wbce0 + wbce1 + wbce2
-        Wiou += wiou0 + wiou1 + wiou2
+        loss3, wbce3, wiou3 = structure_loss(pred3, target)
+        Loss = loss0 + loss1 + loss2 + loss3
+        Wbce = wbce0 + wbce1 + wbce2 + wbce3
+        Wiou = wiou0 + wiou1 + wiou2 + wiou3
 
     print("Test epoch:{} loss:{} wbce:{} wiou:{}".format(epoch+1, 
                                                         Loss.item(),
@@ -126,7 +141,7 @@ def test_medics(model, device, writer, test_dataloader, epoch):
 
     metrics_result = metrics.mean(len(test_dataloader))
     print("Test Metrics Result:")
-    print('Dice: %.4f\nIoU: %.4f\nPre: %.4f\nRecall: %.4f\n' %(metrics_result['Dice'], metrics_result['IoU'],
+    print('Dice: %.4f\nIoU: %.4f\nPre: %.4f\nRecall: %.4f' %(metrics_result['Dice'], metrics_result['IoU'],
                                                                metrics_result['Pre'], metrics_result['Recall']))
     writer.add_scalar('info/metrics/Dice', metrics_result['Dice'], epoch+1)
     writer.add_scalar('info/metrics/IoU', metrics_result['IoU'], epoch+1)
@@ -138,15 +153,29 @@ def main():
     print(config_base)  
     print(path_config)
     print(config_neck)
+    print(config_decoder)
+    print()
     file_path = os.path.join(path_config['csv_path'], path_config['train_version'] + '.csv')
     file_path = file_check(file_path)
     os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    print('save csv path:', file_path)
     csv_f = open(file_path, 'w' , encoding='utf-8')
     csv_writer = csv.writer(csv_f)
     csv_writer.writerow(['time', 'step', 'train Loss', 'train wbce', 'train wiou',
                          'test Loss', 'test wbce', 'test wiou',
                          'test metrics Dice', 'test metrics IoU', 'test metrics Pre', 'test metrics Recall'])
-    
+   
+    model_save_path = os.path.join(path_config['save_path'], path_config['train_version'])
+    model_save_path = dir_check(model_save_path)
+    os.makedirs(model_save_path, exist_ok=True)
+    print('model save path:', model_save_path)
+
+    tensorboard_save_path = os.path.join(path_config['tensorboard_path'], 
+                                                path_config['train_version'])
+    print('save tensorboard path:', tensorboard_save_path)
+    writer = SummaryWriter(log_dir=tensorboard_save_path)
+
+    print()
     dataset = FullDataset(path_config['train_image_path'],
                         path_config['train_mask_path'],
                         config_base['image_size'],
@@ -169,9 +198,10 @@ def main():
     optim = opt.AdamW([{"params":model.parameters(), "initia_lr": config_base['lr']}],
                        lr=config_base['lr'], weight_decay=config_base['weight_decay'])
     scheduler = CosineAnnealingLR(optim, config_base['epoch'], eta_min=1.0e-7)
-    os.makedirs(path_config['save_path'], exist_ok=True)
-    writer = SummaryWriter(log_dir=os.path.join(path_config['tensorboard_path'], 
-                                                path_config['train_version']))
+    
+    Min_Loss = 100000
+
+    
     
     for epoch in range(config_base['epoch']):
         Loss, Wbce, Wiou = 0, 0, 0
@@ -182,13 +212,14 @@ def main():
             x = x.to(device)
             target = target.to(device)
             optim.zero_grad()
-            pred0, pred1, pred2 = model(x)
+            pred0, pred1, pred2, pred3 = model(x)
             loss0, wbce0, wiou0 = structure_loss(pred0, target)
             loss1, wbce1, wiou1 = structure_loss(pred1, target)
             loss2, wbce2, wiou2 = structure_loss(pred2, target)
-            loss = loss0 + loss1 + loss2
-            wbce = wbce0 + wbce1 + wbce2
-            wiou = wiou0 + wiou1 + wiou2
+            loss3, wbce3, wiou3 = structure_loss(pred3, target)
+            loss = loss0 + loss1 + loss2 + loss3
+            wbce = wbce0 + wbce1 + wbce2 + wbce3
+            wiou = wiou0 + wiou1 + wiou2 + wiou3
             Loss += loss
             Wbce += wbce
             Wiou += wiou
@@ -205,15 +236,24 @@ def main():
         writer.add_scalar('info/wiou', Wiou.item(), epoch+1)
                       
         scheduler.step()
-        if (epoch+1) % 5 == 0 or (epoch+1) == config_base['epoch']:
-            torch.save(model.state_dict(), os.path.join(path_config['save_path'], 'SAM2-UNet-%d.pth' % (epoch + 1)))
-            print('[Saving Snapshot:]', os.path.join(path_config['save_path'], 'SAM2-UNet-%d.pth'% (epoch + 1)))
-
+        
         test_Loss, test_wbce, test_wiou, Dice, IoU, Pre, Recall = test_medics(model, device, writer, test_dataloader, epoch)
 
+        if(Min_Loss > test_Loss):
+            print('[Saving Basted Snapshot:]', os.path.join(model_save_path, 'SAM2-UNet-Best.pth'))
+            torch.save(model.state_dict(), os.path.join(model_save_path, 'SAM2-UNet-Best.pth'))
+            Min_Loss = test_Loss
+            
+        elif(epoch+1 == config_base['epoch']):
+            print('[Saving Lasted Snapshot:]', os.path.join(model_save_path, 'SAM2-UNet-Last.pth'))
+            torch.save(model.state_dict(), os.path.join(model_save_path, 'SAM2-UNet-Last.pth'))
+            
+        print()
         csv_writer.writerow((time.asctime(), epoch+1, Loss.item(), Wbce.item(), Wiou.item(), 
                       test_Loss, test_wbce, test_wiou, Dice, IoU, Pre,Recall))      
-
+    
+    writer.close()
+    
 # def seed_torch(seed=1024):
 # 	random.seed(seed)
 # 	os.environ['PYTHONHASHSEED'] = str(seed)
