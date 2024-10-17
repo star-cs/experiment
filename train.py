@@ -1,6 +1,7 @@
 import os
 import argparse
 import random
+import time
 import numpy as np
 import torch
 import torch.optim as opt
@@ -12,7 +13,8 @@ from dataset import FullDataset, TestDataset
 from SAM2UNet import SAM2UNet
 from config import path_config, config_base
 from torch.utils.tensorboard import SummaryWriter
-
+import pandas as pd
+import csv
 
 def evaluate(pred, gt):
     if isinstance(pred, (list, tuple)):
@@ -72,10 +74,25 @@ def structure_loss(pred, mask):
     wiou = 1 - (inter + 1)/(union - inter+ 1)
     return (wbce + wiou).mean(), wbce.mean(), wiou.mean()
 
+def file_check(file_name):
+    temp_file_name = file_name
+    i = 1
+    while i:
+        print(temp_file_name)
+        print(os.path.exists(temp_file_name))
+        if os.path.exists(temp_file_name):
+            name, suffix = file_name.split('.')
+            name += '(' + str(i) + ')'
+            temp_file_name = name+'.'+suffix
+            i = i+1
+        else:
+            return temp_file_name
+
 @torch.no_grad
 def test_medics(model, device, writer, test_dataloader, epoch):
-    metrics = Metrics(['Dice', 'IoU', 'Sen', 'Spe', 'Acc'])
-
+    # metrics = Metrics(['Dice', 'IoU', 'Sen', 'Spe', 'Acc'])
+    metrics = Metrics(['Dice', 'IoU']) 
+    
     Loss, Wbce, Wiou = 0, 0, 0
     test_dataloader = tqdm(test_dataloader)
     for i, batch in enumerate(test_dataloader):
@@ -87,9 +104,9 @@ def test_medics(model, device, writer, test_dataloader, epoch):
                         
         _Dice, _IoU, _Sen, _Spe, _Acc = evaluate(pred0, target)
                         
-        metrics.update(Dice = _Dice, IoU = _IoU, Sen = _Sen, 
-                        Spe = _Spe, Acc = _Acc)
-
+        # metrics.update(Dice = _Dice, IoU = _IoU, Sen = _Sen, 
+        #                 Spe = _Spe, Acc = _Acc)
+        metrics.update(Dice = _Dice, IoU = _IoU)
         loss0, wbce0, wiou0 = structure_loss(pred0, target)
         loss1, wbce1, wiou1 = structure_loss(pred1, target)
         loss2, wbce2, wiou2 = structure_loss(pred2, target)
@@ -97,7 +114,8 @@ def test_medics(model, device, writer, test_dataloader, epoch):
         Wbce += wbce0 + wbce1 + wbce2
         Wiou += wiou0 + wiou1 + wiou2
 
-    print("Test loss:{} wbce:{} wiou:{}".format(Loss.item(),
+    print("Test epoch:{} loss:{} wbce:{} wiou:{}".format(epoch+1, 
+                                                        Loss.item(),
                                                         Wbce.item(), 
                                                         Wiou.item()))
     writer.add_scalar('info/test_loss', Loss.item(), epoch+1)
@@ -106,19 +124,28 @@ def test_medics(model, device, writer, test_dataloader, epoch):
 
     metrics_result = metrics.mean(len(test_dataloader))
     print("Test Metrics Result:")
-    print('Dice:  %.4f\nIoU: %.4f\nSen: %.4f\nSpe: %.4f\nAcc: %.4f, '
-                            % (metrics_result['Dice'], metrics_result['IoU'], metrics_result['Sen'],
-                            metrics_result['Spe'], metrics_result['Acc']))
+    print('Dice: %.4f\nIoU: %.4f\n' %(metrics_result['Dice'], metrics_result['IoU']))
+    # print('Dice: %.4f\nIoU: %.4f\nSen: %.4f\nSpe: %.4f\nAcc: %.4f'
+    #                         % (metrics_result['Dice'], metrics_result['IoU'], metrics_result['Sen'],
+    #                         metrics_result['Spe'], metrics_result['Acc']))
     writer.add_scalar('info/metrics/Dice', metrics_result['Dice'], epoch+1)
     writer.add_scalar('info/metrics/IoU', metrics_result['IoU'], epoch+1)
-    writer.add_scalar('info/metrics/Sen', metrics_result['Sen'], epoch+1)
-    writer.add_scalar('info/metrics/Spe', metrics_result['Spe'], epoch+1)
-    writer.add_scalar('info/metrics/Acc', metrics_result['Acc'], epoch+1)      
-       
+    # writer.add_scalar('info/metrics/Sen', metrics_result['Sen'], epoch+1)
+    # writer.add_scalar('info/metrics/Spe', metrics_result['Spe'], epoch+1)
+    # writer.add_scalar('info/metrics/Acc', metrics_result['Acc'], epoch+1)      
+    return Loss.item(), Wbce.item(), Wiou.item(), metrics_result['Dice'],  metrics_result['IoU']
 
 def main():  
     print(config_base)  
     print(path_config)
+    
+    file_path = os.path.join(path_config['csv_path'], path_config['train_version'] + '.csv')
+    file_path = file_check(file_path)
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    csv_f = open(file_path, 'w' , encoding='utf-8')
+    csv_writer = csv.writer(csv_f)
+    csv_writer.writerow(['time', 'step', 'train Loss', 'train wbce', 'train wiou',
+                         'test Loss', 'test wbce', 'test wiou', 'test metrics Dice', 'test metrics IoU'])
     
     dataset = FullDataset(path_config['train_image_path'],
                         path_config['train_mask_path'],
@@ -143,7 +170,8 @@ def main():
                        lr=config_base['lr'], weight_decay=config_base['weight_decay'])
     scheduler = CosineAnnealingLR(optim, config_base['epoch'], eta_min=1.0e-7)
     os.makedirs(path_config['save_path'], exist_ok=True)
-    writer = SummaryWriter(log_dir=path_config['tensorboard_path'])
+    writer = SummaryWriter(log_dir=os.path.join(path_config['tensorboard_path'], 
+                                                path_config['train_version']))
     
     for epoch in range(config_base['epoch']):
         Loss, Wbce, Wiou = 0, 0, 0
@@ -168,7 +196,7 @@ def main():
             loss.backward()
             optim.step()
            
-        print("Train epoch:{}: loss:{} wbce:{} wiou:{}".format(epoch + 1,
+        print("Train epoch:{} loss:{} wbce:{} wiou:{}".format(epoch + 1,
                                                         Loss.item(),
                                                         Wbce.item(), 
                                                         Wiou.item()))
@@ -181,9 +209,10 @@ def main():
             torch.save(model.state_dict(), os.path.join(path_config['save_path'], 'SAM2-UNet-%d.pth' % (epoch + 1)))
             print('[Saving Snapshot:]', os.path.join(path_config['save_path'], 'SAM2-UNet-%d.pth'% (epoch + 1)))
 
-        test_medics(model, device, writer, test_dataloader, epoch)
+        test_Loss, test_wbce, test_wiou, Dice, IoU = test_medics(model, device, writer, test_dataloader, epoch)
 
-            
+        csv_writer.writerow((time.asctime(), epoch+1, Loss.item(), Wbce.item(), Wiou.item(), 
+                      test_Loss, test_wbce, test_wiou, Dice, IoU))      
 
 # def seed_torch(seed=1024):
 # 	random.seed(seed)

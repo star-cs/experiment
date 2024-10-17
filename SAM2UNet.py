@@ -692,7 +692,6 @@ class SAM2UNet(nn.Module):
 		# self.encoder.blocks = nn.Sequential(
 		#     *blocks
 		# )
-		
 		self.embed_dim = [144, 288, 576, 1152]
 		self.depth = [2, 6, 36, 4]
 		self.blocks = nn.ModuleList()
@@ -773,7 +772,92 @@ class SAM2UNet(nn.Module):
 											Reshaper(feature_size[1], channel_list[1], num_patchs, embed_dim),                                 
 											Reshaper(feature_size[2], channel_list[2], num_patchs, embed_dim),    
 											Reshaper(feature_size[3], channel_list[3], num_patchs, embed_dim),])
-					
+	
+	def encoder_forward(self, feature_maps: torch.Tensor, x: torch.Tensor):
+		'''
+		每一次前向传播，每一张图片，先 init_handcrafted，通过 fft 获取一些特征信息，通过线性层处理Hiera的中间特征层
+		接着通过 init_prompt，将两个特征层 embed
+		通过get_prompt，两个特征层相加，再经过 Adapter Mlp 结构，返回最后的结构
+		同一个块结构，使用同一个 Adapter Mlp ，对融合的特征层进行处理。
+		'''
+		inp = x
+		x = self.encoder.patch_embed(x)
+		# x: (B, H, W, C)
+		handcrafted1, handcrafted2, handcrafted3, handcrafted4 = self.prompt_generator.init_handcrafted(inp)
+
+		self.block1 = []
+		self.block2 = []
+		self.block3 = []
+		self.block4 = []
+		outputs = []
+
+		for i, blk in enumerate(self.encoder.blocks):
+			if i < 3:
+				self.block1.append(blk)  # 第一个块包含前3个元素
+			elif 2 < i < 9:
+				self.block2.append(blk)  # 第二个块包含接下来的6个元素
+			elif 8 < i < 45:
+				self.block3.append(blk)  # 第三个块包含接下来的36个元素
+			elif 44 < i:
+				self.block4.append(blk)  # 其余元素组成第四个块
+
+		# Add pos embed
+		x = x + self.encoder._get_pos_embed(x.shape[1:3])
+
+		if '1' in self.tuning_stage:
+			prompt1 = self.prompt_generator.init_prompt(x, handcrafted1, 1)
+		for i, blk in enumerate(self.block1):
+			if '1' in self.tuning_stage:
+				x = self.prompt_generator.get_prompt(x, prompt1, 1, i)
+			x = blk(x)
+		# x = self.norm1(x)
+			if i == 1:
+				feat = x.permute(0, 3, 1, 2)
+				outputs.append(feat)
+
+		if '2' in self.tuning_stage:
+			prompt2 = self.prompt_generator.init_prompt(x, handcrafted2, 2)
+		for i, blk in enumerate(self.block2):
+			if '2' in self.tuning_stage:
+				x = self.prompt_generator.get_prompt(x, prompt2, 2, i)
+			x = blk(x)
+		# x = self.norm2(x)
+			if i == 4:
+				feat = x.permute(0, 3, 1, 2)
+				outputs.append(feat)
+
+		if '3' in self.tuning_stage:
+			prompt3 = self.prompt_generator.init_prompt(x, handcrafted3, 3)
+		
+		index = 0
+		for i, blk in enumerate(self.block3):
+			if '3' in self.tuning_stage:
+				x = self.prompt_generator.get_prompt(x,prompt3, 3, i)
+			# 插入cnn特征图
+			if feature_maps != [None] * 4:
+				if(i in [4, 14, 24, 34]):
+					# print(f"此时x的shape {x.shape}")    # 4, 14, 24, 34  torch.Size([2, 32, 32, 576])
+					# print(f"feature_maps的shape {feature_maps[index].shape}")
+					x = x + feature_maps[index]
+
+			x = blk(x)
+		# x = self.norm3(x)
+			if i == 34:
+				feat = x.permute(0, 3, 1, 2)
+				outputs.append(feat)
+
+		if '4' in self.tuning_stage:
+			prompt4 = self.prompt_generator.init_prompt(x, handcrafted4, 4)
+		for i, blk in enumerate(self.block4):
+			if '4' in self.tuning_stage:
+				x = self.prompt_generator.get_prompt(x, prompt4, 4, i)
+			x = blk(x)
+		# x = self.norm4(x)
+			if i == 2:
+				feat = x.permute(0, 3, 1, 2)
+				outputs.append(feat)
+		return outputs
+		
 	def forward(self, x):
 		feature_maps_in_new = [None] * 4
 		if(self.cnn_backbone != None):
@@ -781,8 +865,9 @@ class SAM2UNet(nn.Module):
 			for i in range(len(feature_maps)):
 				feature_maps_in_new[i] = self.adapters_in[i](feature_maps[i])
 				feature_maps_in_new[i] = feature_maps_in_new[i].permute(0, 2, 3, 1)
-			
-		x1, x2, x3, x4 = self.encoder(x, self.prompt_generator, self.tuning_stage, feature_maps_in_new)
+
+		x1, x2, x3, x4 = self.encoder_forward(feature_maps_in_new, x)
+		# x1, x2, x3, x4 = self.encoder(x, self.prompt_generator, self.tuning_stage, feature_maps_in_new)
 		# print(f"图像经过hiera的尺寸变化 {x.shape} {x1.shape} {x2.shape} {x3.shape} {x4.shape}")
 		# 图像经过hiera的尺寸变化 
 		# torch.Size([2, 3, 512, 512]) 

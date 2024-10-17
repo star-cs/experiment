@@ -15,7 +15,8 @@ config_base = {
     'log_path' : 'log', 
     'save_model' : 'model_log', 
     'tensorboard_path' : 'tensorboard_log',
-    
+    'csv_path' : 'csv',
+
     'epoch' : 20,
     'lr' : 0.001,
     'batch_size' : 2,
@@ -28,7 +29,7 @@ config_base = {
 
     'adapter_type' : 'adaptor',     # adaptor fully_shared fully_unshared
     'cnn_label' : 'none',       # none resnet50 convnextv2_base segnext_base
-
+        
 }
 
 
@@ -71,6 +72,12 @@ path_config = {
     'tensorboard_path' : str(os.path.join(config_base['root_path'],
                                           config_base['log_path'],
                                           config_base['tensorboard_path'])),
+
+    'csv_path' : str(os.path.join(config_base['root_path'],
+                                config_base['log_path'],
+                                config_base['csv_path'])), 
+
+    'train_version' : config_base['cnn_label'] + "_" + config_base['adapter_type'],  #  用于区分log文件
                                          
 }
 
