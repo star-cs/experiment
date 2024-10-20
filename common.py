@@ -131,3 +131,17 @@ class Reshaper(nn.Module):
         for layer in self.reshaper:
             x = layer(x)
         return x
+
+
+def dice_coeff(pred, label):
+    smooth = 1.
+    bs = pred.size(0)
+    m1 = pred.contiguous().view(bs, -1)
+    m2 = label.contiguous().view(bs, -1)
+    intersection = (m1 * m2).sum()
+    score = 1 - ((2. * intersection + smooth) / (m1.sum() + m2.sum() + smooth))
+    return score
+
+def bce_loss(pred, label):
+    score = torch.nn.BCELoss()(pred, label)
+    return score

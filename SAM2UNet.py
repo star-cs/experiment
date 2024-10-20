@@ -1,12 +1,15 @@
 from itertools import repeat
 import math
+from typing import Tuple
 import warnings
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from cnn_backbone import ResNet, buile_convnextv2, buile_segnext
-from common import Reshaper
+from common import LayerNorm2d, Reshaper
 from decoder import EMCAD
+from decoder.DAPSAM.memory_prompt import PrototypePromptGenerate
+from decoder.wrapped import SAMMaskDecoderWrapper_Med
 from sam2.build_sam import build_sam2
 from u_neck import RCM, Duck_Block
 import utils
@@ -18,7 +21,7 @@ if TORCH_MAJOR == 1 and TORCH_MINOR < 8:
 else:
 	import collections.abc as container_abcs
 
-from config import config_base, path_config, config_neck, config_decoder
+from config import config_base, path_config, config_neck, config_decoder, config_prompt_encoder
 
 class DoubleConv(nn.Module):
 	"""(convolution => [BN] => ReLU) * 2"""
@@ -672,7 +675,7 @@ class SAM2UNet(nn.Module):
 			model = build_sam2(model_cfg, checkpoint_path)
 		else:
 			model = build_sam2(model_cfg)
-		del model.sam_mask_decoder
+		# del model.sam_mask_decoder
 		del model.sam_prompt_encoder
 		del model.memory_encoder
 		del model.memory_attention
@@ -682,6 +685,14 @@ class SAM2UNet(nn.Module):
 		del model.image_encoder.neck
 		self.encoder = model.image_encoder.trunk
 
+		if(config_prompt_encoder['prompt_type'] == 'DAPSAM'):
+			self.mask_decoder = model.sam_mask_decoder
+			self.prompt = PrototypePromptGenerate()			
+			self.adapte_conv_down = Reshaper(16 , 1152, 32, 256)    
+			self.adapte_conv_top = Reshaper(128 , 144, 128, 32)    
+			self.mask_decoder = SAMMaskDecoderWrapper_Med(ori_sam=model)
+			
+			
 		for param in self.encoder.parameters():
 			param.requires_grad = False
 		
@@ -892,6 +903,7 @@ class SAM2UNet(nn.Module):
 				feature_maps_in_new[i] = feature_maps_in_new[i].permute(0, 2, 3, 1)
 
 		x1, x2, x3, x4 = self.encoder_forward(feature_maps_in_new, x)
+		ori_x1, ori_x2, ori_x3, ori_x4 = x1, x2, x3, x4
 		# x1, x2, x3, x4 = self.encoder(x, self.prompt_generator, self.tuning_stage, feature_maps_in_new)
 		# print(f"图像经过hiera的尺寸变化 {x.shape} {x1.shape} {x2.shape} {x3.shape} {x4.shape}")
 		# 图像经过hiera的尺寸变化 
@@ -913,7 +925,7 @@ class SAM2UNet(nn.Module):
 			if(neck_type == 'Duck'):
 				x1, x2, x3, x4 = self.duck1(x1), self.duck2(x2), self.duck3(x3), self.duck4(x4)
 		
-
+		
 		if(config_decoder['decoder_type'] == 'UNet'):
 			x = x4
 			out3 = F.interpolate(self.side3(x), scale_factor=32, mode='bilinear')
@@ -935,7 +947,32 @@ class SAM2UNet(nn.Module):
 			out1 = F.interpolate(p2, scale_factor=8, mode='bilinear')
 			out = F.interpolate(p1, scale_factor=4, mode='bilinear')
 			
-		return out, out1, out2, out3
+			if(config_prompt_encoder['prompt_type'] == 'DAPSAM'):
+				image_embedding = self.adapte_conv_down(ori_x4)				# 256*32*32
+				multi_scale_feature = self.adapte_conv_top(dec_outs[3])		
+				sparse_embeddings, prompt = self.prompt(image_embedding)
+					
+				low_res_masks, iou_predictions = self.mask_decoder(
+					image_embeddings=image_embedding,
+					image_pe=self.prompt.get_dense_pe(),
+					sparse_prompt_embeddings=sparse_embeddings,
+					dense_prompt_embeddings=prompt,
+					multi_scale_feature = multi_scale_feature,
+				)
+				masks = self.postprocess_masks(
+					low_res_masks,
+					input_size=(config_base['image_size'], config_base['image_size']),
+					original_size=(config_base['image_size'], config_base['image_size'])
+				)
+				outputs = {
+					'masks': masks,
+					'iou_predictions': iou_predictions,
+					'low_res_logits': low_res_masks
+				}
+				return outputs
+
+			
+		# return out, out1, out2, out3
 
 # if __name__ == "__main__":
 # 	with torch.no_grad():
@@ -945,6 +982,18 @@ class SAM2UNet(nn.Module):
 # 		out, out1, out2 = model(x)
 # 		print(out.shape, out1.shape, out2.shape)
 
-
-
-		
+	def postprocess_masks(
+        self,
+        masks: torch.Tensor,
+        input_size: Tuple[int, ...],
+        original_size: Tuple[int, ...],
+    	) -> torch.Tensor:
+			masks = F.interpolate(
+				masks,
+				(config_base['image_size'], config_base['image_size']),
+				mode="bilinear",
+				align_corners=False,
+			)
+			masks = masks[..., : input_size[0], : input_size[1]]
+			masks = F.interpolate(masks, original_size, mode="bilinear", align_corners=False)
+			return masks

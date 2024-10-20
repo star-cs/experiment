@@ -1,12 +1,13 @@
 import os
 
 config_base = {
-    'root_path' : '/home/yang/SAM2-UNet',
+    'root_path' : '/home/yang/experiment',
     
     'ckp_path' : 'checkpoint',
     'ckp_hiera_name' : 'sam2_hiera_large.pt',
     
     'dataset_path': 'data_demo',
+    'num_class' : 1,
     'train_image_name' : 'Kvasir-SEG/images/Train/',
     'train_gt_name' : 'Kvasir-SEG/masks/Train/',
     'test_image_name' : 'Kvasir-SEG/images/Val/',
@@ -51,10 +52,18 @@ config_neck = {
     'neck_type' : ['None'], 
 }
 
+config_prompt_encoder = {
+    'prompt_type' : 'DAPSAM',
+}
+
 config_decoder = {
     # UNet   默认                              # 使用这个模块，neck得加RFB，把通道数全部转成 64
     # EMCAD  https://arxiv.org/abs/2405.06880  # 使用这个模块，默认neck部分就不能改变通道数。此时，neck_type只能为None
     'decoder_type' : 'EMCAD'            
+}
+
+config_loss = {
+    'dice_param' : 0.8
 }
 
 path_config = {

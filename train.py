@@ -9,9 +9,10 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.optim.lr_scheduler import CosineAnnealingLR
 from tqdm import tqdm
+from common import bce_loss, dice_coeff
 from dataset import FullDataset, TestDataset
 from SAM2UNet import SAM2UNet
-from config import path_config, config_base, config_neck, config_decoder
+from config import path_config, config_base, config_neck, config_decoder, config_prompt_encoder, config_loss
 from tensorboardX import SummaryWriter
 import pandas as pd
 import csv
@@ -109,35 +110,32 @@ def test_medics(model, device, writer, test_dataloader, epoch):
     # metrics = Metrics(['Dice', 'IoU', 'Sen', 'Spe', 'Acc'])
     metrics = Metrics(['Dice', 'IoU', 'Pre', 'Recall']) 
     
-    Loss, Wbce, Wiou = 0, 0, 0
+    Loss, Loss_ce, Loss_dice = 0, 0, 0
     test_dataloader = tqdm(test_dataloader)
     for i, batch in enumerate(test_dataloader):
         x = batch['image']
         target = batch['label']
         x = x.to(device)
         target = target.to(device)
-        pred0, pred1, pred2, pred3 = model(x)
+        outputs = model(x)
+        loss, loss_ce, loss_dice = calc_riga_loss(outputs, target, config_loss['dice_param'])
+        Loss += loss
+        Loss_ce += loss_ce
+        Loss_dice += loss_dice
+        
+        seg_output = torch.sigmoid(outputs['masks'])
+        
+        _Dice, _IoU, _Pre, _Recall = evaluate(seg_output, target)
                         
-        _Dice, _IoU, _Pre, _Recall = evaluate(pred0, target)
-                        
-        # metrics.update(Dice = _Dice, IoU = _IoU, Sen = _Sen, 
-        #                 Spe = _Spe, Acc = _Acc)
-        metrics.update(Dice = _Dice, IoU = _IoU , Pre = _Pre, Recall = _Recall)
-        loss0, wbce0, wiou0 = structure_loss(pred0, target)
-        loss1, wbce1, wiou1 = structure_loss(pred1, target)
-        loss2, wbce2, wiou2 = structure_loss(pred2, target)
-        loss3, wbce3, wiou3 = structure_loss(pred3, target)
-        Loss = loss0 + loss1 + loss2 + loss3
-        Wbce = wbce0 + wbce1 + wbce2 + wbce3
-        Wiou = wiou0 + wiou1 + wiou2 + wiou3
+        metrics.update(Dice = _Dice, IoU = _IoU, Pre = _Pre, Recall = _Recall)
 
-    print("Test epoch:{} loss:{} wbce:{} wiou:{}".format(epoch+1, 
+    print("Test epoch:{} loss:{} Loss_ce:{} Loss_dice:{}".format(epoch+1, 
                                                         Loss.item(),
-                                                        Wbce.item(), 
-                                                        Wiou.item()))
+                                                        Loss_ce.item(), 
+                                                        Loss_dice.item()))
     writer.add_scalar('info/test_loss', Loss.item(), epoch+1)
-    writer.add_scalar('info/test_wbce', Wbce.item(), epoch+1)
-    writer.add_scalar('info/test_wiou', Wiou.item(), epoch+1)
+    writer.add_scalar('info/test_Loss_ce', Loss_ce.item(), epoch+1)
+    writer.add_scalar('info/test_Loss_dice', Loss_dice.item(), epoch+1)
 
     metrics_result = metrics.mean(len(test_dataloader))
     print("Test Metrics Result:")
@@ -147,7 +145,26 @@ def test_medics(model, device, writer, test_dataloader, epoch):
     writer.add_scalar('info/metrics/IoU', metrics_result['IoU'], epoch+1)
     writer.add_scalar('info/metrics/Pre', metrics_result['Pre'], epoch+1)
     writer.add_scalar('info/metrics/Recall', metrics_result['Recall'], epoch+1)
-    return Loss.item(), Wbce.item(), Wiou.item(), metrics_result['Dice'],  metrics_result['IoU'], metrics_result['Pre'] , metrics_result['Recall']
+    return Loss.item(), Loss_ce.item(), Loss_dice.item(), metrics_result['Dice'],  metrics_result['IoU'], metrics_result['Pre'] , metrics_result['Recall']
+
+
+def calc_riga_loss(outputs, label_batch, dice_weight:float=0.8):
+    logits0 = outputs['masks'][:, 0]
+    pred0 = torch.nn.Sigmoid()(logits0)
+    label_batch0 = (label_batch[:, 0] > 0) * 1.0
+    loss_ce0 = bce_loss(pred=pred0, label=label_batch0)
+    loss_dice0 = dice_coeff(pred=pred0, label=label_batch0)
+    loss0 = (1 - dice_weight) * loss_ce0 + dice_weight * loss_dice0
+
+    logits1 = outputs['masks'][:, 1]
+    pred1 = torch.nn.Sigmoid()(logits1)
+    label_batch1 = (label_batch[:, 0] == 2) * 1.0
+    loss_ce1 = bce_loss(pred=pred1, label=label_batch1)
+    loss_dice1 = dice_coeff(pred=pred1, label=label_batch1)
+    loss1 = (1 - dice_weight) * loss_ce1 + dice_weight * loss_dice1
+
+    return loss0+loss1, loss_ce0+loss_ce1, loss_dice0+loss_dice1
+
 
 def main():  
     print(config_base)  
@@ -161,8 +178,8 @@ def main():
     print('save csv path:', file_path)
     csv_f = open(file_path, 'w' , encoding='utf-8')
     csv_writer = csv.writer(csv_f)
-    csv_writer.writerow(['time', 'step', 'train Loss', 'train wbce', 'train wiou',
-                         'test Loss', 'test wbce', 'test wiou',
+    csv_writer.writerow(['time', 'step', 'train Loss', 'train Loss_ce', 'train Loss_dice',
+                         'test Loss', 'test Loss_ce', 'test Loss_dice',
                          'test metrics Dice', 'test metrics IoU', 'test metrics Pre', 'test metrics Recall'])
    
     model_save_path = os.path.join(path_config['save_path'], path_config['train_version'])
@@ -201,10 +218,8 @@ def main():
     
     Min_Loss = 100000
 
-    
-    
     for epoch in range(config_base['epoch']):
-        Loss, Wbce, Wiou = 0, 0, 0
+        Loss, Loss_ce, Loss_dice = 0, 0, 0
         dataloader = tqdm(dataloader)
         for i, batch in enumerate(dataloader):
             x = batch['image']
@@ -212,32 +227,27 @@ def main():
             x = x.to(device)
             target = target.to(device)
             optim.zero_grad()
-            pred0, pred1, pred2, pred3 = model(x)
-            loss0, wbce0, wiou0 = structure_loss(pred0, target)
-            loss1, wbce1, wiou1 = structure_loss(pred1, target)
-            loss2, wbce2, wiou2 = structure_loss(pred2, target)
-            loss3, wbce3, wiou3 = structure_loss(pred3, target)
-            loss = loss0 + loss1 + loss2 + loss3
-            wbce = wbce0 + wbce1 + wbce2 + wbce3
-            wiou = wiou0 + wiou1 + wiou2 + wiou3
-            Loss += loss
-            Wbce += wbce
-            Wiou += wiou
             
+            outputs = model(x)
+            loss, loss_ce, loss_dice = calc_riga_loss(outputs, target, config_loss['dice_param'])
+            Loss += loss    
+            Loss_ce += loss_ce
+            Loss_dice += loss_dice
+                  
             loss.backward()
             optim.step()
            
-        print("Train epoch:{} loss:{} wbce:{} wiou:{}".format(epoch + 1,
+        print("Train epoch:{} loss:{} Loss_ce:{} Loss_dice:{}".format(epoch + 1,
                                                         Loss.item(),
-                                                        Wbce.item(), 
-                                                        Wiou.item()))
+                                                        Loss_ce.item(), 
+                                                        Loss_dice.item()))
         writer.add_scalar('info/loss', Loss.item(), epoch+1)
-        writer.add_scalar('info/wbce', Wbce.item(), epoch+1)
-        writer.add_scalar('info/wiou', Wiou.item(), epoch+1)
+        writer.add_scalar('info/loss_ce', Loss_ce.item(), epoch+1)
+        writer.add_scalar('info/loss_dice', Loss_dice.item(), epoch+1)
                       
         scheduler.step()
         
-        test_Loss, test_wbce, test_wiou, Dice, IoU, Pre, Recall = test_medics(model, device, writer, test_dataloader, epoch)
+        test_Loss, test_Loss_ce, test_Loss_dice, Dice, IoU, Pre, Recall = test_medics(model, device, writer, test_dataloader, epoch)
 
         if(Min_Loss > test_Loss):
             print('[Saving Basted Snapshot:]', os.path.join(model_save_path, 'SAM2-UNet-Best.pth'))
@@ -249,8 +259,8 @@ def main():
             torch.save(model.state_dict(), os.path.join(model_save_path, 'SAM2-UNet-Last.pth'))
             
         print()
-        csv_writer.writerow((time.asctime(), epoch+1, Loss.item(), Wbce.item(), Wiou.item(), 
-                      test_Loss, test_wbce, test_wiou, Dice, IoU, Pre,Recall))      
+        csv_writer.writerow((time.asctime(), epoch+1, Loss.item(), Loss_ce.item(), Loss_dice.item(), 
+                      test_Loss, test_Loss_ce, test_Loss_dice, Dice, IoU, Pre, Recall))      
     
     writer.close()
     
