@@ -1,16 +1,25 @@
 import os
 
 config_base = {
-    'root_path' : '/home/yang/SAM2-UNet',
+    'root_path' : '/home/yang/experiment',
     
     'ckp_path' : 'checkpoint',
     'ckp_hiera_name' : 'sam2_hiera_large.pt',
     
-    'dataset_path': 'data_demo',
+    'dataset_path': 'datasets',
+    'dataset_label': 'Synapse' , # Kvasir 1 Synapse 7
+    'num_classes' : 8,
+
+    # Kvasir
     'train_image_name' : 'Kvasir-SEG/images/Train/',
     'train_gt_name' : 'Kvasir-SEG/masks/Train/',
     'test_image_name' : 'Kvasir-SEG/images/Val/',
     'test_gt_name' : 'Kvasir-SEG/masks/Val/', 
+
+    # Synapse
+    'Synapse_image_name' : 'Synapse/images/',
+    'Synapse_masks_name' : 'Synapse/masks/',
+    'Synapse_lists' : 'Synapse/',
     
     'log_path' : 'log', 
     'save_model' : 'model_log', 
@@ -71,6 +80,7 @@ path_config = {
                                          config_base['ckp_path'],
                                          'mscan_b.pth')),
 
+    # Kvasir
     'train_image_path' : str(os.path.join(config_base['root_path'], 
                                           config_base['dataset_path'],
                                           config_base['train_image_name'])) ,
@@ -87,6 +97,16 @@ path_config = {
                                          config_base['dataset_path'],
                                          config_base['test_gt_name'])) ,                    
     
+    # Synapse
+    'Synapse_image_path' : str(os.path.join(config_base['root_path'],
+                                         config_base['dataset_path'],
+                                         config_base['Synapse_image_name'])) , 
+    'Synapse_masks_path' : str(os.path.join(config_base['root_path'],
+                                         config_base['dataset_path'],
+                                         config_base['Synapse_masks_name'])) , 
+    'Synapse_lists_path' : str(os.path.join(config_base['root_path'],
+                                         config_base['dataset_path'],
+                                         config_base['Synapse_lists'])) , 
 
     'save_path' : str(os.path.join(config_base['root_path'],
                                    config_base['log_path'],

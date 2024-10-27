@@ -749,10 +749,10 @@ class SAM2UNet(nn.Module):
 						expansion_factor=2, dw_parallel=True, add=True, lgag_ks=3, activation='relu')
 			print('Model %s created, param count: %d' %
 						('EMCAD decoder: ', sum([m.numel() for m in self.decoder.parameters()])))
-			self.out_head4 = nn.Conv2d(channels[0], 1, 1)
-			self.out_head3 = nn.Conv2d(channels[1], 1, 1)
-			self.out_head2 = nn.Conv2d(channels[2], 1, 1)
-			self.out_head1 = nn.Conv2d(channels[3], 1, 1)
+			self.out_head4 = nn.Conv2d(channels[0], config_base['num_classes'], 1)
+			self.out_head3 = nn.Conv2d(channels[1], config_base['num_classes'], 1)
+			self.out_head2 = nn.Conv2d(channels[2], config_base['num_classes'], 1)
+			self.out_head1 = nn.Conv2d(channels[3], config_base['num_classes'], 1)
 
 # ============================ cnn ============================
 		if(config_base['cnn_label'] == 'none'):
