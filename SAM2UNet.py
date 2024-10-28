@@ -797,7 +797,13 @@ class SAM2UNet(nn.Module):
 											Reshaper(feature_size[1], channel_list[1], num_patchs, embed_dim),                                 
 											Reshaper(feature_size[2], channel_list[2], num_patchs, embed_dim),    
 											Reshaper(feature_size[3], channel_list[3], num_patchs, embed_dim),])
-	
+		
+		self.initChannlesConv = nn.Sequential(
+			nn.Conv2d(1, 3, kernel_size=1),
+			nn.BatchNorm2d(3),
+			nn.ReLU(inplace=True)
+		)
+
 	def encoder_forward(self, feature_maps: torch.Tensor, x: torch.Tensor):
 		'''
 		每一次前向传播，每一张图片，先 init_handcrafted，通过 fft 获取一些特征信息，通过线性层处理Hiera的中间特征层
@@ -805,6 +811,11 @@ class SAM2UNet(nn.Module):
 		通过get_prompt，两个特征层相加，再经过 Adapter Mlp 结构，返回最后的结构
 		同一个块结构，使用同一个 Adapter Mlp ，对融合的特征层进行处理。
 		'''
+		
+		# if grayscale input, convert to 3 channels
+		if x.size()[1] == 1:
+			x = self.initChannlesConv(x)
+
 		inp = x
 		x = self.encoder.patch_embed(x)
 		# x: (B, H, W, C)

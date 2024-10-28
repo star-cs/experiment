@@ -1,115 +1,100 @@
-import torchvision.transforms.functional as F
-import numpy as np
-import random
 import os
-from PIL import Image
-from torchvision.transforms import InterpolationMode
+import random
+import h5py
+import numpy as np
+import torch
+import cv2
+from scipy import ndimage
+from scipy.ndimage import zoom
 from torch.utils.data import Dataset
-from torchvision import transforms
-from PIL import Image
-from config import config_base
-from torch import torch
-
-class ToTensor(object):
-
-    def __call__(self, data):
-        image, label = data['image'], data['label']
-        return {'image': F.to_tensor(image), 'label': F.to_tensor(label)}
 
 
-class Resize(object):
-
-    def __init__(self, size):
-        self.size = size
-
-    def __call__(self, data):
-        image, label = data['image'], data['label']
-
-        return {'image': F.resize(image, self.size), 'label': F.resize(label, self.size, interpolation=InterpolationMode.BICUBIC)}
-
-
-class RandomHorizontalFlip(object):
-    def __init__(self, p=0.5):
-        self.p = p
-
-    def __call__(self, data):
-        image, label = data['image'], data['label']
-
-        if random.random() < self.p:
-            return {'image': F.hflip(image), 'label': F.hflip(label)}
-
-        return {'image': image, 'label': label}
+def random_rot_flip(image, label):
+    k = np.random.randint(0, 4)
+    image = np.rot90(image, k)
+    label = np.rot90(label, k)
+    axis = np.random.randint(0, 2)
+    image = np.flip(image, axis=axis).copy()
+    label = np.flip(label, axis=axis).copy()
+    return image, label
 
 
-class RandomVerticalFlip(object):
-    def __init__(self, p=0.5):
-        self.p = p
-
-    def __call__(self, data):
-        image, label = data['image'], data['label']
-
-        if random.random() < self.p:
-            return {'image': F.vflip(image), 'label': F.vflip(label)}
-
-        return {'image': image, 'label': label}
+def random_rotate(image, label):
+    angle = np.random.randint(-20, 20)
+    image = ndimage.rotate(image, angle, order=0, reshape=False)
+    label = ndimage.rotate(label, angle, order=0, reshape=False)
+    return image, label
 
 
-class Normalize(object):
-    def __init__(self, mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]):
-        self.mean = mean
-        self.std = std
+class RandomGenerator(object):
+    def __init__(self, output_size):
+        self.output_size = output_size
 
     def __call__(self, sample):
         image, label = sample['image'], sample['label']
-        image = F.normalize(image, self.mean, self.std)
-        return {'image': image, 'label': label}
-    
+
+        if random.random() > 0.5:
+            image, label = random_rot_flip(image, label)
+        elif random.random() > 0.5:
+            image, label = random_rotate(image, label)
+        x, y = image.shape
+        if x != self.output_size[0] or y != self.output_size[1]:
+            image = zoom(image, (self.output_size[0] / x, self.output_size[1] / y), order=3)  # why not 3?
+            label = zoom(label, (self.output_size[0] / x, self.output_size[1] / y), order=0)
+        image = torch.from_numpy(image.astype(np.float32)).unsqueeze(0)
+        label = torch.from_numpy(label.astype(np.float32))
+        sample = {'image': image, 'label': label.long()}
+        return sample
+
 
 class SynapseDataset(Dataset):
-    def __init__(self, data_dir, mask_dir, size, mode, list_dir):
-        
-        self.sample_list = open(os.path.join(list_dir, mode + '.txt')).readlines()
-        self.data_dir = data_dir
-        self.mask_dir = mask_dir
-        self.mode = mode
-        if mode == 'train':
-            self.transform = transforms.Compose([
-                Resize((size, size)),
-                RandomHorizontalFlip(p=0.5),
-                RandomVerticalFlip(p=0.5),
-                ToTensor(),
-                Normalize()
-            ])
-        else:
-            self.transform = transforms.Compose([
-                Resize((size, size)),
-                ToTensor(),
-                Normalize()
-            ])
-            
-    def __getitem__(self, idx):
-        try:
-            slice_name = self.sample_list[idx].strip('\n')
-            data_path = os.path.join(self.data_dir, slice_name)         
-            gt_path = os.path.join(self.mask_dir, slice_name)
-            image = self.rgb_loader(data_path)
-            label = self.binary_loader(gt_path)
-        except:
-            print(slice_name)
-            
-        data = {'image': image, 'label': label}
-        data = self.transform(data)
-        return data
+    def __init__(self, base_dir, list_dir, split, nclass=9, transform=None):
+        self.transform = transform  # using transform in torch!
+        self.split = split
+        self.sample_list = open(os.path.join(list_dir, self.split+'.txt')).readlines()
+        self.data_dir = base_dir
+        self.nclass = nclass
 
     def __len__(self):
         return len(self.sample_list)
 
-    def rgb_loader(self, path):
-        with open(path, 'rb') as f:
-            img = Image.open(f)
-            return img.convert('RGB')
-        
-    def binary_loader(self, path):
-        with open(path, 'rb') as f:
-            img = Image.open(f)
-            return img.convert('L')
+    def __getitem__(self, idx):
+        if self.split == "train":
+            slice_name = self.sample_list[idx].strip('\n')
+            data_path = os.path.join(self.data_dir, slice_name+'.npz')
+            data = np.load(data_path)
+            image, label = data['image'], data['label']
+            #print(image.shape)
+            #image = np.reshape(image, (512, 512))
+            #image = cv2.cvtColor(image, cv2.COLOR_GRAY2RGB)
+            
+            #label = np.reshape(label, (512, 512))
+            
+            
+        else:
+            vol_name = self.sample_list[idx].strip('\n')
+            filepath = os.path.join(self.data_dir , vol_name + ".npy.h5")
+            data = h5py.File(filepath)
+            image, label = data['image'][:], data['label'][:]
+            #image = np.reshape(image, (image.shape[2], 512, 512))
+            #label = np.reshape(label, (label.shape[2], 512, 512))
+            #label[label==5]= 0
+            #label[label==9]= 0
+            #label[label==10]= 0
+            #label[label==12]= 0
+            #label[label==13]= 0
+            #label[label==11]= 5
+
+        if self.nclass == 9:
+            label[label==5]= 0
+            label[label==9]= 0
+            label[label==10]= 0
+            label[label==12]= 0
+            label[label==13]= 0
+            label[label==11]= 5
+            
+        sample = {'image': image, 'label': label}
+        if self.transform:
+            sample = self.transform(sample)
+        sample['case_name'] = self.sample_list[idx].strip('\n')
+        return sample

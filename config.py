@@ -6,9 +6,9 @@ config_base = {
     'ckp_path' : 'checkpoint',
     'ckp_hiera_name' : 'sam2_hiera_large.pt',
     
-    'dataset_path': 'datasets',
-    'dataset_label': 'Synapse' , # Kvasir 1 Synapse 7
-    'num_classes' : 8,
+    'dataset_path': 'data_demo',  # data_demo datasets
+    'dataset_label': 'Synapse' , # Kvasir 1 Synapse 9
+    'num_classes' : 9,
 
     # Kvasir
     'train_image_name' : 'Kvasir-SEG/images/Train/',
@@ -17,9 +17,9 @@ config_base = {
     'test_gt_name' : 'Kvasir-SEG/masks/Val/', 
 
     # Synapse
-    'Synapse_image_name' : 'Synapse/images/',
-    'Synapse_masks_name' : 'Synapse/masks/',
-    'Synapse_lists' : 'Synapse/',
+    'Synapse_train_name' : 'Synapse/train_npz_new/',
+    'Synapse_test_name' : 'Synapse/test_vol_h5_new/',
+    'Synapse_lists' : 'Synapse/lists_Synapse',
     
     'log_path' : 'log', 
     'save_model' : 'model_log', 
@@ -98,33 +98,37 @@ path_config = {
                                          config_base['test_gt_name'])) ,                    
     
     # Synapse
-    'Synapse_image_path' : str(os.path.join(config_base['root_path'],
+    'Synapse_train_path' : str(os.path.join(config_base['root_path'],
                                          config_base['dataset_path'],
-                                         config_base['Synapse_image_name'])) , 
-    'Synapse_masks_path' : str(os.path.join(config_base['root_path'],
+                                         config_base['Synapse_train_name'])) , 
+    'Synapse_test_path' : str(os.path.join(config_base['root_path'],
                                          config_base['dataset_path'],
-                                         config_base['Synapse_masks_name'])) , 
+                                         config_base['Synapse_test_name'])) , 
     'Synapse_lists_path' : str(os.path.join(config_base['root_path'],
                                          config_base['dataset_path'],
                                          config_base['Synapse_lists'])) , 
 
     'save_path' : str(os.path.join(config_base['root_path'],
                                    config_base['log_path'],
-                                   config_base['save_model'])),
+                                   config_base['save_model'],
+                                   config_base['dataset_label'])),
                                    
                                    
     'tensorboard_path' : str(os.path.join(config_base['root_path'],
                                           config_base['log_path'],
-                                          config_base['tensorboard_path'])),
+                                          config_base['tensorboard_path'],
+                                          config_base['dataset_label'])),
 
     'csv_path' : str(os.path.join(config_base['root_path'],
                                 config_base['log_path'],
-                                config_base['csv_path'])), 
+                                config_base['csv_path'],
+                                config_base['dataset_label'])), 
 
     'train_version' : str(config_base['cnn_label'] + "_" + 
                     config_base['adapter_type'] + "_" + 
                     '+'.join(str(item) for item in config_neck['neck_type'])  + "_" +  
-                    config_decoder['decoder_type']),  #  用于区分log文件                                       
+                    config_decoder['decoder_type'] + "_" + 
+                    config_base['dataset_label']),  #  用于区分log文件                                       
 }
 
 
