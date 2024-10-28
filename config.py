@@ -6,10 +6,17 @@ config_base = {
     'ckp_path' : 'checkpoint',
     'ckp_hiera_name' : 'sam2_hiera_large.pt',
     
-    'dataset_path': 'data_demo',  # data_demo datasets
-    'dataset_label': 'Synapse' , # Kvasir 1 Synapse 9
-    'num_classes' : 9,
+    'dataset_path': 'datasets',  # data_demo datasets
 
+    
+    # Kvasir 1 
+    # Synapse 9   512        
+    # ACDC 4      224              
+    
+    'dataset_label': 'ACDC', 
+    'num_classes' : 4,
+    'image_size' : 224,
+    
     # Kvasir
     'train_image_name' : 'Kvasir-SEG/images/Train/',
     'train_gt_name' : 'Kvasir-SEG/masks/Train/',
@@ -21,6 +28,13 @@ config_base = {
     'Synapse_test_name' : 'Synapse/test_vol_h5_new/',
     'Synapse_lists' : 'Synapse/lists_Synapse',
     
+
+    # ACDC
+    'ACDC_train_name' : 'ACDC/train',
+    'ACDC_valid_name' : 'ACDC/valid',
+    'ACDC_test_name' : 'ACDC/test', 
+    'ACDC_lists' : 'ACDC/lists_ACDC',
+
     'log_path' : 'log', 
     'save_model' : 'model_log', 
     'tensorboard_path' : 'tensorboard_log',
@@ -31,7 +45,7 @@ config_base = {
     'batch_size' : 2,
     'weight_decay' : 5e-4,
 
-    'image_size' : 512,
+    
 
     'embed_dim' : 576,              # hiera，插入cnn特征层时候的通道数
     'num_patchs' : 32,              # hiera，插入cnn特征层时候的尺寸
@@ -107,6 +121,21 @@ path_config = {
     'Synapse_lists_path' : str(os.path.join(config_base['root_path'],
                                          config_base['dataset_path'],
                                          config_base['Synapse_lists'])) , 
+
+    # ACDC
+    'ACDC_train_path' : str(os.path.join(config_base['root_path'],
+                                         config_base['dataset_path'],
+                                         config_base['ACDC_train_name'])), 
+    'ACDC_valid_path' : str(os.path.join(config_base['root_path'],
+                                         config_base['dataset_path'],
+                                         config_base['ACDC_valid_name'])), 
+    'ACDC_test_path' : str(os.path.join(config_base['root_path'],
+                                         config_base['dataset_path'],
+                                         config_base['ACDC_test_name'])),  
+    'ACDC_lists_path' : str(os.path.join(config_base['root_path'],
+                                         config_base['dataset_path'],
+                                         config_base['ACDC_lists'])) ,                            
+
 
     'save_path' : str(os.path.join(config_base['root_path'],
                                    config_base['log_path'],
