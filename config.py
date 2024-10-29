@@ -13,8 +13,8 @@ config_base = {
     # Synapse 9   512        
     # ACDC 4      224              
     
-    'dataset_label': 'ACDC', 
-    'num_classes' : 4,
+    'dataset_label': 'Kvasir', 
+    'num_classes' : 1,
     'image_size' : 224,
     
     # Kvasir
@@ -22,6 +22,12 @@ config_base = {
     'train_gt_name' : 'Kvasir-SEG/masks/Train/',
     'test_image_name' : 'Kvasir-SEG/images/Val/',
     'test_gt_name' : 'Kvasir-SEG/masks/Val/', 
+
+    # Kvasir-Total
+    'Kvasir_train_image_name' : 'Kvasir-Total/TrainDataset/image/',
+    'Kvasir_train_masks_name' : 'Kvasir-Total/TrainDataset/masks/',
+    'Kvasir_test_datasets_name' : 'Kvasir-Total/TestDataset/',
+    'Kvasir_test_lists' : ['Kvasir', 'CVC-300', 'CVC-ClinicDB', 'ETIS-LaribPolypDB', 'CVC-ColonDB'],
 
     # Synapse
     'Synapse_train_name' : 'Synapse/train_npz_new/',
@@ -109,7 +115,25 @@ path_config = {
 
     'test_mask_path' : str(os.path.join(config_base['root_path'],
                                          config_base['dataset_path'],
-                                         config_base['test_gt_name'])) ,                    
+                                         config_base['test_gt_name'])) ,       
+
+    # Kvasir-all
+    'Kvasir_train_image_path': str(os.path.join(config_base['root_path'], 
+                                      config_base['dataset_path'],
+                                      config_base['Kvasir_train_image_name'])),
+                                      
+    'Kvasir_train_masks_path': str(os.path.join(config_base['root_path'], 
+                                      config_base['dataset_path'],
+                                      config_base['Kvasir_train_masks_name'])),
+
+    'Kvasir_test_path' : [
+        os.path.join(config_base['root_path'], 
+                        config_base['dataset_path'],
+                        config_base['Kvasir_test_datasets_name'],
+                        dataset)
+        for dataset in config_base['Kvasir_test_lists']
+    ],
+    
     
     # Synapse
     'Synapse_train_path' : str(os.path.join(config_base['root_path'],
