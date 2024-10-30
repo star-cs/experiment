@@ -66,16 +66,21 @@ class Metrics(object):
         return mean_metrics
 
 def structure_loss(pred, mask):
-    weit = 1 + 5*torch.abs(F.avg_pool2d(mask, kernel_size=31, stride=1, padding=15) - mask)
+    weit = 1 + 5 * torch.abs(F.avg_pool2d(mask, kernel_size=31, stride=1, padding=15) - mask)
     # 二元交叉熵损失
     pred = torch.sigmoid(pred)
     wbce = torch.nn.BCELoss(reduction='none')(pred, mask)
-    wbce = (weit*wbce).sum(dim=(2, 3)) / weit.sum(dim=(2, 3))
-    inter = ((pred * mask)*weit).sum(dim=(2, 3))
-    union = ((pred + mask)*weit).sum(dim=(2, 3))
+    wbce = (weit * wbce).sum(dim=(2, 3)) / weit.sum(dim=(2, 3))
     
-    wiou = 1 - (inter + 1)/(union - inter+ 1)
-    return (wbce + wiou).mean(), wbce.mean(), wiou.mean()
+    # 计算交集和并集
+    inter = ((pred * mask) * weit).sum(dim=(2, 3))
+    union = ((pred + mask) * weit).sum(dim=(2, 3))
+    
+    # 计算Dice损失
+    epsilon = 1e-6
+    wdice = 1 - (2 * inter + epsilon) / (union + epsilon)
+    
+    return (wbce + wdice).mean(), wbce.mean(), wdice.mean()
 
 def file_check(file_name):
     temp_file_name = file_name
@@ -106,11 +111,9 @@ def dir_check(file_name):
             return temp_file_name
 
 @torch.no_grad
-def test_medics(model, device, writer, test_dataloader, epoch):
-    # metrics = Metrics(['Dice', 'IoU', 'Sen', 'Spe', 'Acc'])
+def test_medics(model, device, writer, test_dataloader, epoch, name):
     metrics = Metrics(['Dice', 'IoU', 'Pre', 'Recall']) 
-    
-    Loss, Wbce, Wiou = 0, 0, 0
+    Loss, Wbce, Wdice = 0, 0, 0
     test_dataloader = tqdm(test_dataloader)
     for i, batch in enumerate(test_dataloader):
         x = batch['image']
@@ -124,31 +127,31 @@ def test_medics(model, device, writer, test_dataloader, epoch):
         # metrics.update(Dice = _Dice, IoU = _IoU, Sen = _Sen, 
         #                 Spe = _Spe, Acc = _Acc)
         metrics.update(Dice = _Dice, IoU = _IoU , Pre = _Pre, Recall = _Recall)
-        loss0, wbce0, wiou0 = structure_loss(pred0, target)
-        loss1, wbce1, wiou1 = structure_loss(pred1, target)
-        loss2, wbce2, wiou2 = structure_loss(pred2, target)
-        loss3, wbce3, wiou3 = structure_loss(pred3, target)
+        loss0, wbce0, wdice0 = structure_loss(pred0, target)
+        loss1, wbce1, wdice1 = structure_loss(pred1, target)
+        loss2, wbce2, wdice2 = structure_loss(pred2, target)
+        loss3, wbce3, wdice3 = structure_loss(pred3, target)
         Loss = loss0 + loss1 + loss2 + loss3
         Wbce = wbce0 + wbce1 + wbce2 + wbce3
-        Wiou = wiou0 + wiou1 + wiou2 + wiou3
+        Wdice = wdice0 + wdice1 + wdice2 + wdice3
 
-    print("Test epoch:{} loss:{} wbce:{} wiou:{}".format(epoch+1, 
+    print("Test epoch:{} loss:{} wbce:{} wdice:{}".format(epoch+1, 
                                                         Loss.item(),
                                                         Wbce.item(), 
-                                                        Wiou.item()))
-    writer.add_scalar('info/test_loss', Loss.item(), epoch+1)
-    writer.add_scalar('info/test_wbce', Wbce.item(), epoch+1)
-    writer.add_scalar('info/test_wiou', Wiou.item(), epoch+1)
+                                                        Wdice.item()))
+    writer.add_scalar('info/{}/test_loss'.format(name), Loss.item(), epoch+1)
+    writer.add_scalar('info/{}/test_wbce'.format(name), Wbce.item(), epoch+1)
+    writer.add_scalar('info/{}/test_wdice'.format(name), Wdice.item(), epoch+1)
 
     metrics_result = metrics.mean(len(test_dataloader))
-    print("Test Metrics Result:")
+    print("Test DatasetName:{} \nMetrics Result:".format(name))
     print('Dice: %.4f\nIoU: %.4f\nPre: %.4f\nRecall: %.4f' %(metrics_result['Dice'], metrics_result['IoU'],
                                                                metrics_result['Pre'], metrics_result['Recall']))
-    writer.add_scalar('info/metrics/Dice', metrics_result['Dice'], epoch+1)
-    writer.add_scalar('info/metrics/IoU', metrics_result['IoU'], epoch+1)
-    writer.add_scalar('info/metrics/Pre', metrics_result['Pre'], epoch+1)
-    writer.add_scalar('info/metrics/Recall', metrics_result['Recall'], epoch+1)
-    return Loss.item(), Wbce.item(), Wiou.item(), metrics_result['Dice'],  metrics_result['IoU'], metrics_result['Pre'] , metrics_result['Recall']
+    writer.add_scalar('info/metrics/{}/Dice'.format(name), metrics_result['Dice'], epoch+1)
+    writer.add_scalar('info/metrics/{}/IoU'.format(name), metrics_result['IoU'], epoch+1)
+    writer.add_scalar('info/metrics/{}/Pre'.format(name), metrics_result['Pre'], epoch+1)
+    writer.add_scalar('info/metrics/{}/Recall'.format(name), metrics_result['Recall'], epoch+1)
+    return Loss.item(), Wbce.item(), Wdice.item(), metrics_result['Dice'],  metrics_result['IoU'], metrics_result['Pre'] , metrics_result['Recall']
 
 def main():  
     print(config_base)  
@@ -162,8 +165,9 @@ def main():
     print('save csv path:', file_path)
     csv_f = open(file_path, 'w' , encoding='utf-8')
     csv_writer = csv.writer(csv_f)
-    csv_writer.writerow(['time', 'step', 'train Loss', 'train wbce', 'train wiou',
-                         'test Loss', 'test wbce', 'test wiou',
+    csv_writer.writerow(['time', 'step', 'train Loss', 'train wbce', 'train wdice',
+                         'name', 
+                         'test Loss', 'test wbce', 'test wdice',
                          'test metrics Dice', 'test metrics IoU', 'test metrics Pre', 'test metrics Recall'])
    
     model_save_path = os.path.join(path_config['save_path'], path_config['train_version'])
@@ -180,15 +184,18 @@ def main():
     dataset = TrainDataset(path_config['Kvasir_train_image_path'],
                         path_config['Kvasir_train_masks_path'],
                         config_base['image_size'])
-     
-    test_loader = TestDataset(path_config['Kvasir_test_path'],
-                        config_base['image_size'])
     
     dataloader = DataLoader(dataset, 
                             batch_size=config_base['batch_size'], 
                             shuffle=True, num_workers=8)
     
-    test_dataloader = DataLoader(test_loader, batch_size=1, shuffle=False)
+    test_dataloader = [] 
+    for i, name in enumerate(config_base['Kvasir_test_lists']):
+        test_loader1 = TestDataset(path_config['Kvasir_test_path'][0],
+                        config_base['image_size'])
+        dataset = DataLoader(test_loader1, batch_size=1, shuffle=False)
+        test_dataloader.append(dataset)
+    
 
     device = torch.device("cuda")
     model = SAM2UNet(path_config['hiera_path'], config_base['adapter_type'])
@@ -197,10 +204,10 @@ def main():
                        lr=config_base['lr'], weight_decay=config_base['weight_decay'])
     scheduler = CosineAnnealingLR(optim, config_base['epoch'], eta_min=1.0e-7)
     
-    Min_Loss = 100000
+    Max_Dice = 100000
 
     for epoch in range(config_base['epoch']):
-        Loss, Wbce, Wiou = 0, 0, 0
+        Loss, Wbce, Wdice = 0, 0, 0
         dataloader = tqdm(dataloader)
         for i, batch in enumerate(dataloader):
             x = batch['image']
@@ -209,44 +216,48 @@ def main():
             target = target.to(device)
             optim.zero_grad()
             pred0, pred1, pred2, pred3 = model(x)
-            loss0, wbce0, wiou0 = structure_loss(pred0, target)
-            loss1, wbce1, wiou1 = structure_loss(pred1, target)
-            loss2, wbce2, wiou2 = structure_loss(pred2, target)
-            loss3, wbce3, wiou3 = structure_loss(pred3, target)
+            loss0, wbce0, wdice0 = structure_loss(pred0, target)
+            loss1, wbce1, wdice1 = structure_loss(pred1, target)
+            loss2, wbce2, wdice2 = structure_loss(pred2, target)
+            loss3, wbce3, wdice3 = structure_loss(pred3, target)
             loss = loss0 + loss1 + loss2 + loss3
             wbce = wbce0 + wbce1 + wbce2 + wbce3
-            wiou = wiou0 + wiou1 + wiou2 + wiou3
+            wdice = wdice0 + wdice1 + wdice2 + wdice3
             Loss += loss
             Wbce += wbce
-            Wiou += wiou
+            Wdice += wdice
             
             loss.backward()
             optim.step()
             break
-        print("Train epoch:{} loss:{} wbce:{} wiou:{}".format(epoch + 1,
+        print("Train epoch:{} loss:{} wbce:{} wdice:{}".format(epoch + 1,
                                                         Loss.item(),
                                                         Wbce.item(), 
-                                                        Wiou.item()))
+                                                        Wdice.item()))
         writer.add_scalar('info/loss', Loss.item(), epoch+1)
         writer.add_scalar('info/wbce', Wbce.item(), epoch+1)
-        writer.add_scalar('info/wiou', Wiou.item(), epoch+1)
+        writer.add_scalar('info/wdice', Wdice.item(), epoch+1)
                       
         scheduler.step()
         
-        test_Loss, test_wbce, test_wiou, Dice, IoU, Pre, Recall = test_medics(model, device, writer, test_dataloader, epoch)
-
-        if(Min_Loss > test_Loss):
-            print('[Saving Basted Snapshot:]', os.path.join(model_save_path, 'SAM2-UNet-Best.pth'))
-            torch.save(model.state_dict(), os.path.join(model_save_path, 'SAM2-UNet-Best.pth'))
-            Min_Loss = test_Loss
+        t_dice = 0.0
+        for i, name in enumerate(config_base['Kvasir_test_lists']):
+            test_Loss, test_wbce, test_wdice, Dice, IoU, Pre, Recall = test_medics(model, device, writer, test_dataloader[i], epoch, name)           
+            csv_writer.writerow((time.asctime(), epoch+1, Loss.item(), Wbce.item(), Wdice.item(), name, 
+                      test_Loss, test_wbce, test_wdice, Dice, IoU, Pre,Recall)) 
+            t_dice += Dice
+        t_dice /= len(config_base['Kvasir_test_lists'])
+        
+        if(Max_Dice < Dice):
+            print('[Saving Basted Snapshot:]', os.path.join(model_save_path, 'Best_' + str(epoch+1) + '_.pth'))
+            torch.save(model.state_dict(), os.path.join(model_save_path, 'Best_' + str(epoch+1) + '_.pth'))
+            Max_Dice = Dice
             
         elif(epoch+1 == config_base['epoch']):
-            print('[Saving Lasted Snapshot:]', os.path.join(model_save_path, 'SAM2-UNet-Last.pth'))
-            torch.save(model.state_dict(), os.path.join(model_save_path, 'SAM2-UNet-Last.pth'))
+            print('[Saving Lasted Snapshot:]', os.path.join(model_save_path, 'Last_' + str(epoch+1) + '_.pth'))
+            torch.save(model.state_dict(), os.path.join(model_save_path, 'Last_' + str(epoch+1) + '_.pth'))
             
         print()
-        csv_writer.writerow((time.asctime(), epoch+1, Loss.item(), Wbce.item(), Wiou.item(), 
-                      test_Loss, test_wbce, test_wiou, Dice, IoU, Pre,Recall))      
     
     writer.close()
     

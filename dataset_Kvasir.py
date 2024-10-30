@@ -80,7 +80,7 @@ class TrainDataset(Dataset):
         ])
         
         print(f"{image_root} has {len(self.images)} images")
-        print(f"{image_root} has {len(self.gts)} gts")
+        print(f"{gt_root} has {len(self.gts)} gts")
         assert(len(self.images) == len(self.gts))
 
     def __getitem__(self, idx):
@@ -109,21 +109,24 @@ class TrainDataset(Dataset):
 
 class TestDataset:
     def __init__(self, test_datas_list, size):
-        self.images = []
-        self.gts = []
-        for path in test_datas_list:
-            image_root = os.path.join(path, 'images')
-            gt_root = os.path.join(path, 'masks')
-            self.images.append([image_root + f for f in os.listdir(image_root) if f.endswith('.jpg') or f.endswith('.png')])
-            self.gts.append([gt_root + f for f in os.listdir(gt_root) if f.endswith('.png') or f.endswith('.jpg')])
+        path = test_datas_list
+        image_root = os.path.join(path, 'images/')
+        gt_root = os.path.join(path, 'masks/')
+        self.images = [image_root + f for f in os.listdir(image_root) if f.endswith('.jpg') or f.endswith('.png')]
+        self.gts = [gt_root + f for f in os.listdir(gt_root) if f.endswith('.png') or f.endswith('.jpg')]
+        
         self.images = sorted(self.images)
         self.gts = sorted(self.gts)
         self.transform = transforms.Compose([
-            transforms.Resize((size, size)),
-            transforms.ToTensor(),
+            Resize((size, size)),
+            ToTensor(),
         ])
         self.size = len(self.images)
         self.index = 0
+        self.dataName = path.split('/')[-1]
+    
+    def __len__(self):
+        return len(self.images)
     
     def __getitem__(self, idx):
         try:
@@ -135,8 +138,7 @@ class TestDataset:
         data = {'image': image, 'label': label}
         data = self.transform(data)
         return data
-    def __len__(self):
-        return len(self.images)
+    
     
     def rgb_loader(self, path):
         with open(path, 'rb') as f:
