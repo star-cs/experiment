@@ -59,6 +59,8 @@ config_base = {
     'adapter_type' : 'adaptor',     # adaptor fully_shared fully_unshared
     'cnn_label' : 'none',       # none resnet50 convnextv2_base segnext_base
         
+
+    'pretrained' : None,    # 预训练模型地址，这里就写绝对地址。
 }
 
 '''
