@@ -8,6 +8,7 @@ from cnn_backbone import ResNet, buile_convnextv2, buile_segnext
 from common import Reshaper
 from decoder import EMCAD
 from sam2.build_sam import build_sam2
+from sam_adapter.LMSA import LMSA
 from u_neck import RCM, Duck_Block
 import utils
 
@@ -65,16 +66,19 @@ class Up(nn.Module):
 
 
 class Adapter(nn.Module):
-	def __init__(self, blk) -> None:
+	def __init__(self, blk, adapter_type) -> None:
 		super(Adapter, self).__init__()
 		self.block = blk
 		dim = blk.attn.qkv.in_features
-		self.prompt_learn = nn.Sequential(
-			nn.Linear(dim, 32),
-			nn.GELU(),
-			nn.Linear(32, dim),
-			nn.GELU()
-		)
+		if(adapter_type == 'LMSA'):
+			self.prompt_learn = LMSA(dim, dim // 3, None)
+		else:
+			self.prompt_learn = nn.Sequential(
+				nn.Linear(dim, 32),
+				nn.GELU(),
+				nn.Linear(32, dim),
+				nn.GELU()
+			)
 
 	def forward(self, x):
 		prompt = self.prompt_learn(x)
@@ -685,31 +689,34 @@ class SAM2UNet(nn.Module):
 		for param in self.encoder.parameters():
 			param.requires_grad = False
 		
-		# blocks = []
-		# for block in self.encoder.blocks:
-		#     blocks.append(
-		#         Adapter(block)
-		#     )
-		# self.encoder.blocks = nn.Sequential(
-		#     *blocks
-		# )
+		
 # ============================ Adapter ============================
-		self.embed_dim = [144, 288, 576, 1152]
-		self.depth = [2, 6, 36, 4]
-		self.blocks = nn.ModuleList()
-		self.scale_factor = 32
-		self.prompt_type = 'highpass'
-		self.tuning_stage = "1234"
-		self.input_type = 'fft'
-		self.freq_nums = 0.25
-		self.handcrafted_tune = True
-		self.embedding_tune = True
-		self.adaptor = adapter_type
-		self.prompt_generator = PromptGenerator(self.scale_factor, self.prompt_type, self.embed_dim,
-												self.tuning_stage, self.depth,
-												self.input_type, self.freq_nums,
-												self.handcrafted_tune, self.embedding_tune, self.adaptor,
-												img_size=config_base['image_size'])
+		if config_base['adapter_type'] in ['adaptor', 'fully_shared', 'fully_unshared'] :
+			self.embed_dim = [144, 288, 576, 1152]
+			self.depth = [2, 6, 36, 4]
+			self.blocks = nn.ModuleList()
+			self.scale_factor = 32
+			self.prompt_type = 'highpass'
+			self.tuning_stage = "1234"
+			self.input_type = 'fft'
+			self.freq_nums = 0.25
+			self.handcrafted_tune = True
+			self.embedding_tune = True
+			self.adaptor = adapter_type
+			self.prompt_generator = PromptGenerator(self.scale_factor, self.prompt_type, self.embed_dim,
+													self.tuning_stage, self.depth,
+													self.input_type, self.freq_nums,
+													self.handcrafted_tune, self.embedding_tune, self.adaptor,
+													img_size=config_base['image_size'])
+		elif config_base['adapter_type'] == 'LMSA':
+			blocks = []
+			for block in self.encoder.blocks:
+				blocks.append(
+					Adapter(block, config_base['adapter_type'])
+				)
+			self.encoder.blocks = nn.Sequential(
+				*blocks
+			)
 # ============================ neck ============================
 		for neck_type in config_neck['neck_type']:
 			if(neck_type == 'None'):		# 此时，neck不操作
@@ -811,14 +818,11 @@ class SAM2UNet(nn.Module):
 		通过get_prompt，两个特征层相加，再经过 Adapter Mlp 结构，返回最后的结构
 		同一个块结构，使用同一个 Adapter Mlp ，对融合的特征层进行处理。
 		'''
-		
-		# if grayscale input, convert to 3 channels
-		if x.size()[1] == 1:
-			x = self.initChannlesConv(x)
 
 		inp = x
 		x = self.encoder.patch_embed(x)
 		# x: (B, H, W, C)
+		
 		handcrafted1, handcrafted2, handcrafted3, handcrafted4 = self.prompt_generator.init_handcrafted(inp)
 
 		self.block1 = []
@@ -893,7 +897,11 @@ class SAM2UNet(nn.Module):
 				feat = x.permute(0, 3, 1, 2)
 				outputs.append(feat)
 		return outputs
-		
+
+	def encoder_LMAS(self, x: torch.Tensor):
+		x1, x2, x3, x4 = self.encoder(x)
+		return x1, x2, x3, x4
+	
 	def forward(self, x):
 		feature_maps_in_new = [None] * 4
 		if(self.cnn_backbone != None):
@@ -901,8 +909,13 @@ class SAM2UNet(nn.Module):
 			for i in range(len(feature_maps)):
 				feature_maps_in_new[i] = self.adapters_in[i](feature_maps[i])
 				feature_maps_in_new[i] = feature_maps_in_new[i].permute(0, 2, 3, 1)
-
-		x1, x2, x3, x4 = self.encoder_forward(feature_maps_in_new, x)
+				
+		# if grayscale input, convert to 3 channels
+		if x.size()[1] == 1:
+			x = self.initChannlesConv(x)
+			
+		if config_base['adapter_type'] in ['adaptor', 'fully_shared', 'fully_unshared'] :
+			x1, x2, x3, x4 = self.encoder_forward(feature_maps_in_new, x)
 		# x1, x2, x3, x4 = self.encoder(x, self.prompt_generator, self.tuning_stage, feature_maps_in_new)
 		# print(f"图像经过hiera的尺寸变化 {x.shape} {x1.shape} {x2.shape} {x3.shape} {x4.shape}")
 		# 图像经过hiera的尺寸变化 
@@ -911,6 +924,11 @@ class SAM2UNet(nn.Module):
 		# torch.Size([2, 288, 64, 64]) 
 		# torch.Size([2, 576, 32, 32]) 
 		# torch.Size([2, 1152, 16, 16])
+
+		elif config_base['adapter_type'] == 'LMSA':
+			x1, x2, x3, x4 = self.encoder_LMAS(x)
+
+			
 		for neck_type in config_neck['neck_type']:
 			if(neck_type == 'None'):		# 此时，neck不操作
 				break

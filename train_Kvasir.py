@@ -207,6 +207,7 @@ def train_one_epoch(dataloader, test_dataloader, device, optim, model, epoch, wr
 			torch.save(state, os.path.join(model_save_path, 'Last_' + str(epoch+1) + '_.pth'))
 			
 		print()
+		
 
 def main():  
 	print(config_base)  
@@ -268,7 +269,7 @@ def main():
 						lr=config_base['lr'], weight_decay=config_base['weight_decay'])
 	scheduler = CosineAnnealingLR(optim, config_base['epoch'], eta_min=1.0e-7)
 	
-	Max_Dice = 100000
+	global Max_Dice
 	
 	if config_base['pretrained'] is not None:
 		for epoch in range(start_epoch, config_base['epoch']):
@@ -291,5 +292,6 @@ def main():
 
 
 if __name__ == "__main__":
+	Max_Dice = 0
 	# seed_torch(1024)
 	main()

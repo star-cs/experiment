@@ -6,7 +6,7 @@ config_base = {
     'ckp_path' : 'checkpoint',
     'ckp_hiera_name' : 'sam2_hiera_large.pt',
     
-    'dataset_path': 'datasets',  # data_demo datasets
+    'dataset_path': 'data_demo',  # data_demo datasets
 
     
     # Kvasir 1 
@@ -56,7 +56,11 @@ config_base = {
     'embed_dim' : 576,              # hiera，插入cnn特征层时候的通道数
     'num_patchs' : 32,              # hiera，插入cnn特征层时候的尺寸
 
-    'adapter_type' : 'adaptor',     # adaptor fully_shared fully_unshared
+
+    # LMSA
+    # adaptor fully_shared fully_unshared 
+    'adapter_type' : 'LMSA',     
+    
     'cnn_label' : 'none',       # none resnet50 convnextv2_base segnext_base
         
 
